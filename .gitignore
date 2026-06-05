@@ -1,0 +1,19 @@
+# Dependencies
+node_modules/
+
+# Build output (Vercel rebuilds this from source)
+dist/
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS / editor cruft
+.DS_Store
+Thumbs.db
+
+# Deploy / tooling
+.vercel/
+
+# Claude Code local (personal) settings
+.claude/settings.local.json
