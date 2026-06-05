@@ -105,6 +105,36 @@ const App = () => {
     return () => urls.forEach(u => URL.revokeObjectURL(u));
   }, [sourceFiles]);
 
+  // Hand finished images to the OS. On mobile, the native share sheet lets the
+  // user tap "Save to Photos" → straight into the camera roll (web pages can't
+  // write the photo library directly). On desktop, fall back to downloads.
+  const saveFiles = async (files: File[]) => {
+    const canShareFiles =
+      typeof navigator !== "undefined" &&
+      typeof navigator.canShare === "function" &&
+      navigator.canShare({ files });
+
+    if (canShareFiles) {
+      try {
+        await navigator.share({ files, title: "Pro Watermark" });
+        return;
+      } catch (err) {
+        if (err instanceof Error && err.name === "AbortError") return; // user closed the sheet
+        // e.g. activation expired on a large batch — fall through to download.
+        console.warn("Share failed, downloading instead:", err);
+      }
+    }
+
+    for (const file of files) {
+      const url = URL.createObjectURL(file);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = file.name;
+      a.click();
+      URL.revokeObjectURL(url);
+    }
+  };
+
   const handleExportAll = async () => {
     if (sourceFiles.length === 0) return alert(t('add_images_first'));
     setIsExporting(true);
@@ -116,6 +146,7 @@ const App = () => {
     // not in config). null = current image isn't ready, fall back to a reload.
     const currentSnapshot = await editorRef.current!.exportBlob().catch(() => null);
     let canvasDisturbed = false;
+    const outFiles: File[] = [];
 
     try {
       for (let i = 0; i < sourceFiles.length; i++) {
@@ -135,17 +166,12 @@ const App = () => {
         }
         const task = processImagePipeline(file, renderToBlob);
         const finalFile = await Effect.runPromise(task);
-        const url = URL.createObjectURL(finalFile);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = `pro_${file.name.replace(/\.(heic|heif)$/i, '.jpg')}`;
-        a.click();
-        URL.revokeObjectURL(url);
+        const name = `pro_${file.name.replace(/\.(heic|heif)$/i, '.jpg')}`;
+        outFiles.push(new File([finalFile], name, { type: "image/jpeg" }));
       }
     } catch (err) {
       console.error(err);
     } finally {
-      setIsExporting(false);
       // Only repaint if the loop actually overwrote the canvas with other
       // images; otherwise leave the user's dragged watermark untouched.
       if (canvasDisturbed) {
@@ -153,6 +179,9 @@ const App = () => {
         if (current) editorRef.current?.restoreView(current).catch(console.error);
       }
     }
+
+    setIsExporting(false);
+    if (outFiles.length > 0) await saveFiles(outFiles);
   };
 
   const handleLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
