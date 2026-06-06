@@ -209,7 +209,16 @@ const CanvasEditor = forwardRef<CanvasEditorRef, CanvasEditorProps>(
         };
 
         useEffect(() => {
-            if (!file || !fabricCanvas.current) return;
+            if (!fabricCanvas.current) return;
+            // No file (e.g. the last queued image was removed) — wipe the canvas
+            // instead of leaving the previous image on screen.
+            if (!file) {
+                fabricCanvas.current.clear();
+                watermarkRef.current = null;
+                fabricCanvas.current.requestRenderAll();
+                setHasImage(false);
+                return;
+            }
             let cancelled = false;
             loadFileOnCanvas(file)
                 .then(async () => {
