@@ -220,7 +220,12 @@ const App = () => {
 
       if (heic) {
         try {
-          const blob = await heicTo({ blob: file, type: "image/jpeg", quality: 0.92 });
+          // High quality on purpose: this JPEG is a throwaway working copy fed
+          // straight into the canvas and re-encoded on export, so its file size
+          // is irrelevant — only its fidelity as canvas input matters. A low
+          // value here would bake in a first-generation loss before the photo is
+          // even drawn.
+          const blob = await heicTo({ blob: file, type: "image/jpeg", quality: 0.95 });
           const name = /\.(heic|heif)$/i.test(file.name) ? file.name.replace(/\.(heic|heif)$/i, ".jpg") : `${file.name}.jpg`;
           accepted.push(new File([blob], name, { type: "image/jpeg" }));
           acceptedNames.push(file.name);

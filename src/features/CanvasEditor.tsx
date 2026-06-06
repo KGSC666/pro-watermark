@@ -72,7 +72,7 @@ const CanvasEditor = forwardRef<CanvasEditorRef, CanvasEditorProps>(({ file, con
 
     const dataUrl = canvas.toDataURL({
       format: 'jpeg',
-      quality: 1,
+      quality: 0.95,
       multiplier,
       left: rect.left,
       top: rect.top,
