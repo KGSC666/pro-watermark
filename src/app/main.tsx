@@ -10,6 +10,7 @@ import { motion, AnimatePresence, MotionConfig } from 'framer-motion';
 import { X, Pipette, AlertTriangle, Info } from 'lucide-react';
 import { Analytics } from '@vercel/analytics/react';
 import { SpeedInsights } from '@vercel/speed-insights/react';
+import { ErrorBoundary } from '../shared/ui/ErrorBoundary';
 
 // A snappy spring used for the sliding selection pills (tabs, position grid).
 const PILL_SPRING = { type: 'spring', stiffness: 500, damping: 35 } as const;
@@ -826,9 +827,11 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
                 </div>
             }
         >
-            <MotionConfig reducedMotion="user">
-                <App />
-            </MotionConfig>
+            <ErrorBoundary>
+                <MotionConfig reducedMotion="user">
+                    <App />
+                </MotionConfig>
+            </ErrorBoundary>
             <Analytics />
             <SpeedInsights />
         </React.Suspense>

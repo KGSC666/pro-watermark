@@ -355,10 +355,13 @@ const CanvasEditor = forwardRef<CanvasEditorRef, CanvasEditorProps>(
                 ref={containerRef}
                 className="relative w-full h-full min-h-0 bg-neutral-950 rounded-[40px] border border-white/5 shadow-2xl overflow-hidden group"
             >
-                {/* 绝对居中的空态提示 */}
-                {!hasImage && (
-                    <div className="absolute inset-0 flex flex-col items-center justify-center gap-6 pointer-events-none z-0 px-8 text-center animate-in fade-in zoom-in-95 duration-700">
-                        <div className="w-16 h-16 md:w-20 md:h-20 bg-white/[0.02] rounded-[24px] flex items-center justify-center border border-white/10 shadow-2xl transition-transform duration-500">
+                {/* 绝对居中的空态提示。始终渲染、仅切换透明度：Fabric 会把 <canvas>
+                    包进自己的 DOM 结构，若在这里条件增删兄弟节点，React 重排时会因
+                    参照节点已被 Fabric 移走而抛 insertBefore 错误并整页崩溃。 */}
+                <div
+                    className={`absolute inset-0 flex flex-col items-center justify-center gap-6 pointer-events-none z-0 px-8 text-center transition-opacity duration-500 ${hasImage ? 'opacity-0' : 'opacity-100'}`}
+                >
+                    <div className="w-16 h-16 md:w-20 md:h-20 bg-white/[0.02] rounded-[24px] flex items-center justify-center border border-white/10 shadow-2xl transition-transform duration-500">
                             <svg
                                 width="32"
                                 height="32"
@@ -380,7 +383,6 @@ const CanvasEditor = forwardRef<CanvasEditorRef, CanvasEditorProps>(
                             </span>
                         </div>
                     </div>
-                )}
 
                 {/* 画布容器，确保它撑满空间 */}
                 <canvas ref={canvasRef} className="absolute inset-0 z-10" />
