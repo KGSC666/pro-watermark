@@ -7,7 +7,7 @@ import { processImagePipeline } from '../kernel/pipeline';
 import type { WatermarkConfig, Placement, Placements } from '../entities/watermark/types';
 import { useTranslation } from 'react-i18next';
 import { motion, AnimatePresence, MotionConfig } from 'framer-motion';
-import { X, Pipette, AlertTriangle, Info } from 'lucide-react';
+import { X, Pipette, AlertTriangle, Info, Trash2 } from 'lucide-react';
 import { Analytics } from '@vercel/analytics/react';
 import { SpeedInsights } from '@vercel/speed-insights/react';
 import { ErrorBoundary } from '../shared/ui/ErrorBoundary';
@@ -15,7 +15,7 @@ import { ErrorBoundary } from '../shared/ui/ErrorBoundary';
 // A snappy spring used for the sliding selection pills (tabs, position grid).
 const PILL_SPRING = { type: 'spring', stiffness: 500, damping: 35 } as const;
 
-type Toast = { id: number; message: string; type: 'warn' | 'error' };
+type Toast = { id: number; message: string; type: 'warn' | 'error' | 'info' };
 const TOAST_TTL_MS = 4200;
 
 // Export is near-instant, so a progress overlay tied to real work just flashes.
@@ -90,6 +90,8 @@ const App = () => {
 
     const [isExporting, setIsExporting] = useState(false);
     const [toasts, setToasts] = useState<Toast[]>([]);
+    // Index of the image awaiting delete confirmation (null = no dialog open).
+    const [confirmDeleteIndex, setConfirmDeleteIndex] = useState<number | null>(null);
 
     // Lightweight self-dismissing notifications, replacing the bare browser alert().
     const showToast = (message: string, type: Toast['type'] = 'warn') => {
@@ -327,6 +329,7 @@ const App = () => {
             const next = index < prev ? prev - 1 : prev;
             return Math.min(next, newLen - 1);
         });
+        showToast(t('image_removed'), 'info');
     };
 
     return (
@@ -403,7 +406,7 @@ const App = () => {
                                                     )}
                                                 </button>
                                                 <button
-                                                    onClick={() => removeImage(i)}
+                                                    onClick={() => setConfirmDeleteIndex(i)}
                                                     title={t('remove')}
                                                     className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-neutral-900 border border-white/20 flex items-center justify-center text-white/60 hover:bg-red-500 hover:text-white hover:border-red-500 transition-colors active:scale-90 shadow-md"
                                                 >
@@ -781,6 +784,56 @@ const App = () => {
                 )}
             </AnimatePresence>
 
+            {/* Delete confirmation dialog */}
+            <AnimatePresence>
+                {confirmDeleteIndex !== null && (
+                    <motion.div
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        transition={{ duration: 0.18 }}
+                        onClick={() => setConfirmDeleteIndex(null)}
+                        className="fixed inset-0 z-[105] bg-black/70 backdrop-blur-md flex items-center justify-center p-6"
+                    >
+                        <motion.div
+                            initial={{ scale: 0.92, opacity: 0, y: 10 }}
+                            animate={{ scale: 1, opacity: 1, y: 0 }}
+                            exit={{ scale: 0.92, opacity: 0, y: 10 }}
+                            transition={PILL_SPRING}
+                            onClick={(e) => e.stopPropagation()}
+                            className="w-full max-w-xs bg-neutral-900 border border-white/10 rounded-3xl p-6 text-center shadow-2xl"
+                        >
+                            <div className="w-12 h-12 mx-auto rounded-2xl bg-red-500/10 border border-red-500/20 flex items-center justify-center mb-4">
+                                <Trash2 size={22} className="text-red-400" />
+                            </div>
+                            <p className="text-base font-bold tracking-tight">
+                                {t('confirm_delete_title')}
+                            </p>
+                            <p className="text-sm text-neutral-500 mt-2 leading-relaxed">
+                                {t('confirm_delete_desc')}
+                            </p>
+                            <div className="flex gap-2 mt-6">
+                                <button
+                                    onClick={() => setConfirmDeleteIndex(null)}
+                                    className="flex-1 py-2.5 rounded-xl bg-white/5 border border-white/10 text-sm font-semibold text-white/80 hover:bg-white/10 active:scale-95 transition-all"
+                                >
+                                    {t('cancel')}
+                                </button>
+                                <button
+                                    onClick={() => {
+                                        removeImage(confirmDeleteIndex);
+                                        setConfirmDeleteIndex(null);
+                                    }}
+                                    className="flex-1 py-2.5 rounded-xl bg-red-500 text-white text-sm font-semibold hover:bg-red-600 active:scale-95 transition-all"
+                                >
+                                    {t('remove')}
+                                </button>
+                            </div>
+                        </motion.div>
+                    </motion.div>
+                )}
+            </AnimatePresence>
+
             {/* Self-dismissing toasts (replaces native alert) */}
             <div className="fixed bottom-8 left-1/2 -translate-x-1/2 z-[110] flex flex-col items-center gap-2 w-full max-w-md px-4 pointer-events-none">
                 <AnimatePresence>
@@ -796,6 +849,8 @@ const App = () => {
                         >
                             {toast.type === 'error' ? (
                                 <AlertTriangle size={18} className="text-red-400 shrink-0 mt-0.5" />
+                            ) : toast.type === 'info' ? (
+                                <Trash2 size={18} className="text-white/50 shrink-0 mt-0.5" />
                             ) : (
                                 <Info size={18} className="text-amber-300 shrink-0 mt-0.5" />
                             )}
