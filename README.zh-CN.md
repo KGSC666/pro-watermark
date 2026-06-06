@@ -1,8 +1,10 @@
 # Pro Watermark
 
-一款 Apple 风格、隐私优先的照片加水印工具。给照片加文字或 Logo 水印的同时，**保留原图元数据与完整分辨率**——全程在浏览器本地完成，图片绝不上传服务器。
+一款隐私优先的照片加水印工具。给照片加文字或 Logo 水印的同时，**保留原图元数据与完整分辨率**——全程在浏览器本地完成，图片绝不上传服务器。
 
 [English](README.md) · **简体中文** · [日本語](README.ja.md)
+
+🔗 **在线体验：** https://pro-watermark.vercel.app/
 
 ---
 
@@ -72,7 +74,7 @@ src/
 
 ## 部署
 
-托管在 Vercel——每次 push 到 `main` 自动部署。Web Analytics 与 Speed Insights 需在 Vercel 后台启用一次。
+托管在 Vercel。
 
 ## 许可
 

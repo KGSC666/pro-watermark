@@ -1,10 +1,12 @@
 # Pro Watermark
 
-An Apple-style, privacy-first watermarking tool for photos. Add a text or logo
-watermark while keeping the original metadata and full resolution — entirely in
-your browser, with nothing ever uploaded to a server.
+A privacy-first watermarking tool for photos. Add a text or logo watermark while
+keeping the original metadata and full resolution — entirely in your browser,
+with nothing ever uploaded to a server.
 
 **English** · [简体中文](README.zh-CN.md) · [日本語](README.ja.md)
+
+🔗 **Live demo:** https://pro-watermark.vercel.app/
 
 ---
 
@@ -90,8 +92,7 @@ src/
 
 ## Deployment
 
-Hosted on Vercel — every push to `main` triggers an automatic deploy. Web
-Analytics and Speed Insights must be enabled once in the Vercel dashboard.
+Hosted on Vercel.
 
 ## License
 
