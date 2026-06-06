@@ -793,7 +793,10 @@ const App = () => {
                         exit={{ opacity: 0 }}
                         transition={{ duration: 0.18 }}
                         onClick={() => setConfirmDeleteIndex(null)}
-                        className="fixed inset-0 z-[105] bg-black/70 backdrop-blur-md flex items-center justify-center p-6"
+                        // pointer-events-auto overrides the `pointer-events: none`
+                        // vaul's modal drawer puts on <body>; without it this dialog
+                        // (rendered outside the drawer) is visible but untappable on mobile.
+                        className="fixed inset-0 z-[105] bg-black/70 backdrop-blur-md flex items-center justify-center p-6 pointer-events-auto"
                     >
                         <motion.div
                             initial={{ scale: 0.92, opacity: 0, y: 10 }}
