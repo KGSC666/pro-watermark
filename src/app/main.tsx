@@ -6,7 +6,21 @@ import { Effect } from "effect";
 import { processImagePipeline } from "../kernel/pipeline";
 import { WatermarkConfig, Placement, Placements } from "../entities/watermark/types";
 import { useTranslation } from "react-i18next";
-import { X, Pipette } from "lucide-react";
+import { motion, AnimatePresence, MotionConfig } from "framer-motion";
+import { X, Pipette, AlertTriangle, Info } from "lucide-react";
+
+// A snappy spring used for the sliding selection pills (tabs, position grid).
+const PILL_SPRING = { type: "spring", stiffness: 500, damping: 35 } as const;
+
+type Toast = { id: number; message: string; type: "warn" | "error" };
+const TOAST_TTL_MS = 4200;
+
+// Export is near-instant, so a progress overlay tied to real work just flashes.
+// Instead the ring fills over a deliberate minimum, then a checkmark confirms —
+// a designed micro-moment. The actual save still fires ASAP (see handleExportAll)
+// so it never delays iOS's share-sheet user-activation window.
+const EXPORT_FILL_MS = 900;
+const EXPORT_DONE_HOLD_MS = 480;
 import ExifReader from "exifreader";
 import { heicTo, isHeic as isHeicContent } from "heic-to";
 import "../shared/lib/i18n"; // 初始化 i18n
@@ -44,6 +58,7 @@ const App = () => {
   const [previews, setPreviews] = useState<string[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [exportProgress, setExportProgress] = useState(0);
+  const [exportComplete, setExportComplete] = useState(false);
   const [metadata, setMetadata] = useState<any>(null);
   // Each source image owns an independent watermark state, so editing one image
   // never touches another. New images clone the current settings as a starting
@@ -72,6 +87,14 @@ const App = () => {
 
 
   const [isExporting, setIsExporting] = useState(false);
+  const [toasts, setToasts] = useState<Toast[]>([]);
+
+  // Lightweight self-dismissing notifications, replacing the bare browser alert().
+  const showToast = (message: string, type: Toast["type"] = "warn") => {
+    const id = Date.now() + Math.random();
+    setToasts(prev => [...prev, { id, message, type }]);
+    setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), TOAST_TTL_MS);
+  };
   const editorRef = useRef<CanvasEditorRef>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const logoInputRef = useRef<HTMLInputElement>(null);
@@ -143,7 +166,9 @@ const App = () => {
   };
 
   const handleExportAll = async () => {
-    if (sourceFiles.length === 0) return alert(t('add_images_first'));
+    if (sourceFiles.length === 0) { showToast(t('add_images_first'), "warn"); return; }
+    const startedAt = performance.now();
+    setExportComplete(false);
     setIsExporting(true);
     setExportProgress(0);
 
@@ -187,8 +212,18 @@ const App = () => {
       }
     }
 
-    setIsExporting(false);
+    // Save FIRST, while we're still inside the click's user-activation window —
+    // iOS only lets navigator.share open from a fresh gesture. The overlay
+    // timing below must never gate this.
     if (outFiles.length > 0) await saveFiles(outFiles);
+
+    // Turn the overlay into a deliberate moment instead of a flash: let the ring
+    // finish filling, then confirm with a checkmark, then dismiss.
+    const elapsed = performance.now() - startedAt;
+    if (elapsed < EXPORT_FILL_MS) await new Promise(r => setTimeout(r, EXPORT_FILL_MS - elapsed));
+    setExportComplete(true);
+    await new Promise(r => setTimeout(r, EXPORT_DONE_HOLD_MS));
+    setIsExporting(false);
   };
 
   const handleLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -240,7 +275,7 @@ const App = () => {
       }
     }
 
-    if (failed.length > 0) alert(t("heic_failed", { names: failed.join(", ") }));
+    if (failed.length > 0) showToast(t("heic_failed", { names: failed.join(", ") }), "error");
     if (accepted.length === 0) return;
 
     // Give each new image its own independent state, cloned from whatever is
@@ -301,9 +336,18 @@ const App = () => {
             {sourceFiles.length > 0 && (
               <div className="p-3 bg-white/5 rounded-2xl border border-white/5 mb-2">
                  <p className="text-[10px] font-bold text-neutral-500 uppercase mb-2 tracking-widest">{t('batch_queue')} ({sourceFiles.length})</p>
-                 <div className="flex gap-2.5 overflow-x-auto pb-2 pt-1 px-1 scrollbar-hide">
-                    {sourceFiles.map((_, i) => (
-                      <div key={i} className="relative shrink-0">
+                 <div className="flex gap-2.5 overflow-x-auto pb-2 pt-2.5 px-2.5 scrollbar-hide">
+                    <AnimatePresence initial={false} mode="popLayout">
+                    {sourceFiles.map((f, i) => (
+                      <motion.div
+                        key={`${f.name}-${f.lastModified}-${f.size}`}
+                        layout
+                        initial={{ opacity: 0, scale: 0.5 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        exit={{ opacity: 0, scale: 0.5 }}
+                        transition={PILL_SPRING}
+                        className="relative shrink-0"
+                      >
                         <button onClick={() => setCurrentIndex(i)} className={`w-10 h-10 rounded-lg block border-2 overflow-hidden transition-all ${currentIndex === i ? 'border-white' : 'border-transparent opacity-40 hover:opacity-70'}`}>
                           {previews[i]
                             ? <img src={previews[i]} alt="" className="w-full h-full object-cover" />
@@ -312,26 +356,45 @@ const App = () => {
                         <button
                           onClick={() => removeImage(i)}
                           title={t('remove')}
-                          className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-neutral-900 border border-white/20 flex items-center justify-center text-white/60 hover:bg-red-500 hover:text-white hover:border-red-500 transition-all active:scale-90 shadow-md"
+                          className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-neutral-900 border border-white/20 flex items-center justify-center text-white/60 hover:bg-red-500 hover:text-white hover:border-red-500 transition-colors active:scale-90 shadow-md"
                         >
                           <X size={9} strokeWidth={2.5} />
                         </button>
-                      </div>
+                      </motion.div>
                     ))}
+                    </AnimatePresence>
                  </div>
               </div>
             )}
 
             <div className="flex p-1 bg-white/5 rounded-xl border border-white/5">
-               <button onClick={() => setConfig({...config, type: 'text'})} className={`flex-1 py-2 rounded-lg text-xs font-semibold transition-all ${config.type === 'text' ? 'bg-white text-black shadow-lg' : 'text-neutral-500'}`}>{t('type_text')}</button>
-               <button onClick={() => setConfig({...config, type: 'image'})} className={`flex-1 py-2 rounded-lg text-xs font-semibold transition-all ${config.type === 'image' ? 'bg-white text-black shadow-lg' : 'text-neutral-500'}`}>{t('type_logo')}</button>
+               {(['text', 'image'] as const).map((tp) => (
+                 <button
+                   key={tp}
+                   onClick={() => setConfig({ ...config, type: tp })}
+                   className={`relative flex-1 py-2 rounded-lg text-xs font-semibold transition-colors ${config.type === tp ? 'text-black' : 'text-neutral-500 hover:text-neutral-300'}`}
+                 >
+                   {config.type === tp && (
+                     <motion.span layoutId="tab-pill" transition={PILL_SPRING} className="absolute inset-0 bg-white rounded-lg shadow-lg" />
+                   )}
+                   <span className="relative z-10">{tp === 'text' ? t('type_text') : t('type_logo')}</span>
+                 </button>
+               ))}
             </div>
 
+            <AnimatePresence mode="wait" initial={false}>
+            <motion.section
+              key={config.type}
+              initial={{ opacity: 0, x: 10 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -10 }}
+              transition={{ duration: 0.2, ease: [0.32, 0.72, 0, 1] }}
+            >
             {config.type === "text" ? (
-              <section className="space-y-5">
+              <div className="space-y-5">
                 <div>
                   <label className="text-[10px] font-bold text-neutral-500 uppercase block mb-2 tracking-widest">{t('watermark_text')}</label>
-                  <input type="text" value={config.text} onChange={(e) => setConfig({...config, text: e.target.value})} className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-white/30 transition-all" placeholder={t('placeholder')} />
+                  <input type="text" value={config.text} onChange={(e) => setConfig({...config, text: e.target.value})} className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-white/30 focus:ring-2 focus:ring-white/10 focus:bg-white/[0.07] transition-[border-color,box-shadow,background-color] duration-200" placeholder={t('placeholder')} />
                 </div>
                 <div>
                   <div className="flex justify-between mb-2">
@@ -365,9 +428,9 @@ const App = () => {
                     </label>
                   </div>
                 </div>
-              </section>
+              </div>
             ) : (
-              <section>
+              <div>
                 <label className="text-[10px] font-bold text-neutral-500 uppercase block mb-2 tracking-widest">{t('upload_logo')}</label>
                 <div className="relative">
                   <button onClick={() => logoInputRef.current?.click()} className="w-full py-8 border-2 border-dashed border-white/10 rounded-2xl flex flex-col items-center gap-2 hover:bg-white/5 transition-all">
@@ -382,8 +445,10 @@ const App = () => {
                     </button>
                   )}
                 </div>
-              </section>
+              </div>
             )}
+            </motion.section>
+            </AnimatePresence>
 
             <section>
               <div className="flex justify-between mb-2">
@@ -404,8 +469,15 @@ const App = () => {
                 {[1,2,3,4,5,6,7,8,9].map(i => {
                   const selected = activePlacement.preset === i;
                   return (
-                    <button key={i} onClick={() => setActivePlacement({ ...activePlacement, preset: i, rel: null })} className={`aspect-square rounded-lg flex items-center justify-center border transition-all ${selected ? 'bg-white/10 border-white/40 shadow-lg' : 'border-transparent hover:bg-white/5'}`}>
-                      <div className={`w-1.5 h-1.5 rounded-full ${selected ? 'bg-white' : 'bg-neutral-700'}`} />
+                    <button key={i} onClick={() => setActivePlacement({ ...activePlacement, preset: i, rel: null })} className="relative aspect-square rounded-lg flex items-center justify-center hover:bg-white/5 transition-colors">
+                      {selected && (
+                        <motion.div layoutId="preset-sel" transition={PILL_SPRING} className="absolute inset-0 bg-white/10 border border-white/40 rounded-lg shadow-lg" />
+                      )}
+                      <motion.div
+                        animate={{ scale: selected ? 1.4 : 1 }}
+                        transition={PILL_SPRING}
+                        className={`relative w-1.5 h-1.5 rounded-full ${selected ? 'bg-white' : 'bg-neutral-700'}`}
+                      />
                     </button>
                   );
                 })}
@@ -433,13 +505,98 @@ const App = () => {
         }
       />
 
-      {isExporting && (
-        <div className="fixed inset-0 z-[100] bg-black/80 backdrop-blur-md flex flex-col items-center justify-center text-center p-8">
-           <div className="w-12 h-12 border-4 border-white/20 border-t-white rounded-full animate-spin mb-4" />
-           <p className="text-lg font-bold tracking-tight">{t('processing')}</p>
-           <p className="text-sm text-neutral-500 mt-2">{t('saving_info', { current: exportProgress, total: sourceFiles.length })}</p>
-        </div>
-      )}
+      <AnimatePresence>
+        {isExporting && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.2 }}
+            className="fixed inset-0 z-[100] bg-black/80 backdrop-blur-md flex flex-col items-center justify-center text-center p-8"
+          >
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0, y: 8 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              transition={{ delay: 0.05, ...PILL_SPRING }}
+              className="flex flex-col items-center"
+            >
+              <div className="relative w-24 h-24 mb-5">
+                <svg className="w-24 h-24 -rotate-90" viewBox="0 0 80 80">
+                  <defs>
+                    <linearGradient id="exportRing" x1="0" y1="0" x2="1" y2="1">
+                      <stop offset="0%" stopColor="#818cf8" />
+                      <stop offset="100%" stopColor="#38bdf8" />
+                    </linearGradient>
+                  </defs>
+                  <circle cx="40" cy="40" r="34" fill="none" stroke="rgba(255,255,255,0.1)" strokeWidth="5" />
+                  {/* Simulated fill: creeps to ~94% over EXPORT_FILL_MS, snaps to 100% on completion. */}
+                  <motion.circle
+                    cx="40" cy="40" r="34" fill="none" stroke="url(#exportRing)" strokeWidth="5" strokeLinecap="round"
+                    strokeDasharray={2 * Math.PI * 34}
+                    initial={{ strokeDashoffset: 2 * Math.PI * 34 }}
+                    animate={{ strokeDashoffset: exportComplete ? 0 : 2 * Math.PI * 34 * 0.06 }}
+                    transition={{ duration: exportComplete ? 0.3 : EXPORT_FILL_MS / 1000, ease: [0.32, 0.72, 0, 1] }}
+                    style={{ filter: "drop-shadow(0 0 5px rgba(99,102,241,0.6))" }}
+                  />
+                </svg>
+                <div className="absolute inset-0 flex items-center justify-center">
+                  <AnimatePresence>
+                    {exportComplete && (
+                      <motion.svg
+                        key="check" viewBox="0 0 24 24" className="w-9 h-9"
+                        initial={{ scale: 0.4, opacity: 0 }}
+                        animate={{ scale: 1, opacity: 1 }}
+                        exit={{ scale: 0.4, opacity: 0 }}
+                        transition={PILL_SPRING}
+                        style={{ filter: "drop-shadow(0 0 5px rgba(56,189,248,0.55))" }}
+                      >
+                        <motion.path
+                          d="M5 13l4 4L19 7" fill="none" stroke="url(#exportRing)" strokeWidth={3}
+                          strokeLinecap="round" strokeLinejoin="round"
+                          initial={{ pathLength: 0 }}
+                          animate={{ pathLength: 1 }}
+                          transition={{ duration: 0.35, ease: "easeOut", delay: 0.05 }}
+                        />
+                      </motion.svg>
+                    )}
+                  </AnimatePresence>
+                </div>
+              </div>
+              <p className="text-lg font-extrabold tracking-tight bg-gradient-to-b from-white to-white/55 bg-clip-text text-transparent">
+                {exportComplete ? t('export_done') : t('processing')}
+              </p>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Self-dismissing toasts (replaces native alert) */}
+      <div className="fixed bottom-8 left-1/2 -translate-x-1/2 z-[110] flex flex-col items-center gap-2 w-full max-w-md px-4 pointer-events-none">
+        <AnimatePresence>
+          {toasts.map(toast => (
+            <motion.div
+              key={toast.id}
+              layout
+              initial={{ opacity: 0, y: 24, scale: 0.92 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 12, scale: 0.92 }}
+              transition={PILL_SPRING}
+              className="pointer-events-auto w-full flex items-start gap-3 px-4 py-3 rounded-2xl bg-neutral-900/80 backdrop-blur-xl border border-white/10 shadow-2xl"
+            >
+              {toast.type === "error"
+                ? <AlertTriangle size={18} className="text-red-400 shrink-0 mt-0.5" />
+                : <Info size={18} className="text-amber-300 shrink-0 mt-0.5" />}
+              <span className="text-sm text-white/90 leading-snug">{toast.message}</span>
+              <button
+                onClick={() => setToasts(prev => prev.filter(x => x.id !== toast.id))}
+                className="ml-auto -mr-1 text-white/30 hover:text-white/80 transition-colors shrink-0"
+              >
+                <X size={15} />
+              </button>
+            </motion.div>
+          ))}
+        </AnimatePresence>
+      </div>
     </>
   );
 };
@@ -447,7 +604,9 @@ const App = () => {
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <React.Suspense fallback={<div className="h-screen w-full bg-black flex items-center justify-center text-white">Loading...</div>}>
-      <App />
+      <MotionConfig reducedMotion="user">
+        <App />
+      </MotionConfig>
     </React.Suspense>
   </React.StrictMode>
 );

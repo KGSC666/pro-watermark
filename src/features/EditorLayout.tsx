@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import { Drawer } from "vaul";
+import { motion, AnimatePresence } from "framer-motion";
 import { Settings, Download, Plus, ChevronRight, Globe } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
@@ -72,12 +73,34 @@ export const EditorLayout: React.FC<EditorLayoutProps> = ({ canvas, controls, on
       onDrop={handleDrop}
       className="relative flex h-screen w-full bg-black overflow-hidden font-sans antialiased text-white selection:bg-white/20"
     >
-      {dragging && (
-        <div className="fixed inset-3 z-[80] bg-black/70 backdrop-blur-md rounded-[40px] border-4 border-dashed border-white/20 flex flex-col items-center justify-center pointer-events-none animate-in fade-in duration-200">
-          <Plus size={40} className="text-white/60 mb-4" />
-          <p className="text-lg font-semibold text-white/80">{t('drop_to_add')}</p>
-        </div>
-      )}
+      {/* 极光氛围背景：缓慢漂移的模糊色光，只在边缘透出，营造高级纵深感 */}
+      <div className="absolute inset-0 z-0 overflow-hidden pointer-events-none">
+        <motion.div
+          className="absolute -top-1/3 -left-1/4 w-[55vw] h-[55vw] rounded-full bg-indigo-600/20 blur-[130px]"
+          animate={{ x: [0, 90, 0], y: [0, 50, 0], scale: [1, 1.15, 1] }}
+          transition={{ duration: 24, repeat: Infinity, ease: "easeInOut" }}
+        />
+        <motion.div
+          className="absolute -bottom-1/3 -right-1/4 w-[50vw] h-[50vw] rounded-full bg-sky-500/15 blur-[130px]"
+          animate={{ x: [0, -70, 0], y: [0, -60, 0], scale: [1, 1.2, 1] }}
+          transition={{ duration: 30, repeat: Infinity, ease: "easeInOut" }}
+        />
+      </div>
+
+      <AnimatePresence>
+        {dragging && (
+          <motion.div
+            initial={{ opacity: 0, scale: 1.02 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 1.02 }}
+            transition={{ duration: 0.18 }}
+            className="fixed inset-3 z-[80] bg-black/70 backdrop-blur-md rounded-[40px] border-4 border-dashed border-white/20 flex flex-col items-center justify-center pointer-events-none"
+          >
+            <Plus size={40} className="text-white/60 mb-4" />
+            <p className="text-lg font-semibold text-white/80">{t('drop_to_add')}</p>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       <main className="flex-1 relative flex items-center justify-center min-w-0 transition-all duration-500">
         <div className="w-full h-full p-4 md:p-12 lg:p-20 flex items-center justify-center relative overflow-hidden">
@@ -100,24 +123,30 @@ export const EditorLayout: React.FC<EditorLayoutProps> = ({ canvas, controls, on
                 >
                   <Globe size={18} strokeWidth={1.5} />
                 </button>
-                {showLangMenu && (
-                  <div 
-                    className="absolute top-full mt-2 left-0 bg-neutral-900 border border-white/10 rounded-xl p-1 shadow-2xl min-w-[120px]"
-                  >
-                    {languages.map(lang => (
-                      <button
-                        key={lang.code}
-                        onClick={() => {
-                          i18n.changeLanguage(lang.code);
-                          setShowLangMenu(false);
-                        }}
-                        className={`w-full text-left px-3 py-2 rounded-lg text-xs transition-colors ${i18n.language.startsWith(lang.code) ? 'bg-white text-black font-bold' : 'hover:bg-white/5 text-neutral-400'}`}
-                      >
-                        {lang.label}
-                      </button>
-                    ))}
-                  </div>
-                )}
+                <AnimatePresence>
+                  {showLangMenu && (
+                    <motion.div
+                      initial={{ opacity: 0, y: -6, scale: 0.96 }}
+                      animate={{ opacity: 1, y: 0, scale: 1 }}
+                      exit={{ opacity: 0, y: -6, scale: 0.96 }}
+                      transition={{ duration: 0.18, ease: [0.32, 0.72, 0, 1] }}
+                      className="absolute top-full mt-2 left-0 origin-top-left bg-neutral-900 border border-white/10 rounded-xl p-1 shadow-2xl min-w-[120px]"
+                    >
+                      {languages.map(lang => (
+                        <button
+                          key={lang.code}
+                          onClick={() => {
+                            i18n.changeLanguage(lang.code);
+                            setShowLangMenu(false);
+                          }}
+                          className={`w-full text-left px-3 py-2 rounded-lg text-xs transition-colors ${i18n.language.startsWith(lang.code) ? 'bg-white text-black font-bold' : 'hover:bg-white/5 text-neutral-400'}`}
+                        >
+                          {lang.label}
+                        </button>
+                      ))}
+                    </motion.div>
+                  )}
+                </AnimatePresence>
              </div>
 
              <div className="w-[1px] h-5 bg-white/10" />
