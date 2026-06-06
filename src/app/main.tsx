@@ -109,8 +109,15 @@ const App = () => {
   // user tap "Save to Photos" → straight into the camera roll (web pages can't
   // write the photo library directly). On desktop, fall back to downloads.
   const saveFiles = async (files: File[]) => {
+    // canShare() is true on desktop Safari/Chrome too, so it isn't a "mobile"
+    // signal — gate on the actual device. iPadOS 13+ spoofs a Mac UA, so a real
+    // touchscreen (maxTouchPoints > 1) tells the iPad apart from a desktop Mac.
+    const ua = typeof navigator !== "undefined" ? navigator.userAgent : "";
+    const isMobile =
+      /Android|iPhone|iPod/.test(ua) ||
+      (/iPad|Macintosh/.test(ua) && navigator.maxTouchPoints > 1);
     const canShareFiles =
-      typeof navigator !== "undefined" &&
+      isMobile &&
       typeof navigator.canShare === "function" &&
       navigator.canShare({ files });
 
