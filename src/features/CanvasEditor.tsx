@@ -58,18 +58,26 @@ const CanvasEditor = forwardRef<CanvasEditorRef, CanvasEditorProps>(({ file, con
     const bgImg = canvas.getObjects().find(obj => (obj as any).isBackground) as FabricImage;
     if (!bgImg) throw new Error("No image loaded");
 
-    // Calculate multiplier to export at original image resolution
-    const multiplier = 1 / bgImg.scaleX;
-
     canvas.discardActiveObject();
     canvas.renderAll();
 
-    // Export at original resolution with 100% JPEG quality
-    // The binary-engine will later stitch back the original segments
+    // Export ONLY the image region, at the photo's native resolution. The editor
+    // canvas is sized to the viewport and the image sits inside it with padding;
+    // capturing the whole canvas would bake that padding in as black bars (JPEG
+    // has no transparency) and yield viewport-shaped, oversized output. Cropping
+    // to the background's bounding box and scaling by 1/scale gives exactly the
+    // source's pixel dimensions with no letterboxing.
+    const rect = bgImg.getBoundingRect();
+    const multiplier = 1 / bgImg.scaleX;
+
     const dataUrl = canvas.toDataURL({
       format: 'jpeg',
       quality: 1,
       multiplier,
+      left: rect.left,
+      top: rect.top,
+      width: rect.width,
+      height: rect.height,
       enableRetinaScaling: false
     });
     const res = await fetch(dataUrl);

@@ -48,16 +48,20 @@ export class BinarySurgery {
   }
 
   /**
-   * 把 EXIF 里的拍摄时间改写为指定时间（默认导出此刻）。
+   * 把 EXIF 调整成适合「导出衍生图」的状态，其余元数据（ICC、GPS、机型等）保持无损。
+   * 做两件事，都在原地覆盖、不改动任何 TIFF 偏移：
    *
-   * 原因：iOS/相册按 EXIF DateTimeOriginal 排序。无损保留原图元数据时，
-   * 会把原图的拍摄时间一起带回去，导致加了水印的图被归档到原图当年的位置，
-   * 用户在相册最新处找不到它。这里只覆盖日期字段（定长 19 字节 ASCII，原地覆盖、
-   * 不改动任何偏移），其余元数据（ICC、GPS、机型等）全部保持无损。
+   * 1) 时间改写：把拍摄时间字段改为指定时间（默认导出此刻）。iOS/相册按
+   *    DateTimeOriginal 排序，原样保留原图时间会让加水印的图被归档回原图当年的位置，
+   *    在相册最新处找不到。
+   *
+   * 2) 方向复位：把 Orientation 置 1。浏览器加载 <img> 时已按 EXIF 方向自动旋转，
+   *    画到画布上的像素是「摆正」的；若再缝回原图带旋转的 Orientation，相册会二次旋转
+   *    导致方向错乱。像素已正，标记必须复位。
    *
    * 非 APP1/EXIF 段或解析失败时原样返回。
    */
-  static refreshExifTimestamp(segment: Uint8Array, date: Date): Uint8Array {
+  static sanitizeExifForExport(segment: Uint8Array, date: Date): Uint8Array {
     if (segment.length < 14) return segment;
     const head = new DataView(segment.buffer, segment.byteOffset, segment.byteLength);
     if (head.getUint16(0) !== 0xFFE1) return segment; // 仅处理 APP1
@@ -114,6 +118,11 @@ export class BinarySurgery {
         // ASCII(type=2) 且长度 >= 19 时，4 字节值域是指向字符串的偏移
         if (dateTags.has(tag) && type === 2 && count >= 19) {
           writeAt(u32(entry + 8), count);
+        } else if (tag === 0x0112 && type === 3) {
+          // Orientation 是 SHORT，值内联在 4 字节值域的前 2 字节，复位为 1
+          view.setUint16(entry + 8, 1, little);
+          out[entry + 10] = 0;
+          out[entry + 11] = 0;
         } else if (tag === 0x8769) {
           exifPtr = u32(entry + 8); // ExifIFD 指针
         }

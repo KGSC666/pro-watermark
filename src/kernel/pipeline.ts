@@ -7,12 +7,13 @@ export const processImagePipeline = (file: File, renderFn: () => Promise<Blob>) 
     const arrayBuffer = yield* _(Effect.tryPromise(() => file.arrayBuffer()));
     const originalBuffer = new Uint8Array(arrayBuffer);
 
-    // 2. 提取元数据 (ICC/EXIF)，并把 EXIF 拍摄时间刷新为导出此刻，
-    //    使成品图在相册按最新时间排序（其余元数据保持无损）
+    // 2. 提取元数据 (ICC/EXIF)，并把 EXIF 调整为适合导出衍生图的状态：
+    //    时间刷新为导出此刻（相册按最新排序）、方向复位为 1（像素已摆正，
+    //    避免相册二次旋转）。其余元数据保持无损。
     const rawSegments = yield* _(BinarySurgery.extractMetadataSegments(originalBuffer));
     const now = new Date();
     const metadataSegments = rawSegments.map((seg) =>
-      BinarySurgery.refreshExifTimestamp(seg, now)
+      BinarySurgery.sanitizeExifForExport(seg, now)
     );
 
     // 3. 执行 Canvas 渲染 (需在 UI 线程或 OffscreenCanvas)

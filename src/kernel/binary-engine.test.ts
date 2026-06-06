@@ -73,54 +73,64 @@ describe("stitch", () => {
   });
 });
 
-describe("refreshExifTimestamp", () => {
+describe("sanitizeExifForExport", () => {
   const ascii = (s: string) => Array.from(s, (c) => c.charCodeAt(0));
   const readStr = (seg: Uint8Array, off: number, len: number) =>
     String.fromCharCode(...seg.slice(off, off + len));
 
-  // Minimal little-endian EXIF APP1: IFD0 -> ExifIFD -> DateTimeOriginal (ASCII[20]).
-  // The 19-char date string lives at segment offset 54.
-  const buildExif = (dateStr: string) => {
+  // Minimal little-endian EXIF APP1: IFD0 (Orientation + ExifIFD ptr) -> ExifIFD
+  // (DateTimeOriginal ASCII[20]). The 19-char date string lives at segment offset 66.
+  const buildExif = (dateStr: string, orientation = 6) => {
     const str20 = [...ascii(dateStr), ...new Array(20 - dateStr.length).fill(0)];
     return new Uint8Array([
-      0xff, 0xe1, 0x00, 0x48,                         // APP1 + length
+      0xff, 0xe1, 0x00, 0x54,                         // APP1 + length
       0x45, 0x78, 0x69, 0x66, 0x00, 0x00,             // "Exif\0\0"
       0x49, 0x49, 0x2a, 0x00,                         // TIFF: "II", magic 0x002A
       0x08, 0x00, 0x00, 0x00,                         // IFD0 at rel offset 8
-      0x01, 0x00,                                     // IFD0: 1 entry
+      0x02, 0x00,                                     // IFD0: 2 entries
+      0x12, 0x01, 0x03, 0x00, 0x01, 0x00, 0x00, 0x00, // tag 0x0112 (Orientation), SHORT[1]
+      orientation, 0x00, 0x00, 0x00,                  //   inline value
       0x69, 0x87, 0x04, 0x00, 0x01, 0x00, 0x00, 0x00, // tag 0x8769 (ExifIFD ptr), LONG
-      0x1a, 0x00, 0x00, 0x00,                         //   -> ExifIFD at rel 26
+      0x26, 0x00, 0x00, 0x00,                         //   -> ExifIFD at rel 38
       0x00, 0x00, 0x00, 0x00,                         // next IFD = 0
       0x01, 0x00,                                     // ExifIFD: 1 entry
       0x03, 0x90, 0x02, 0x00, 0x14, 0x00, 0x00, 0x00, // tag 0x9003 (DateTimeOriginal), ASCII[20]
-      0x2c, 0x00, 0x00, 0x00,                         //   -> string at rel 44
+      0x38, 0x00, 0x00, 0x00,                         //   -> string at rel 56
       0x00, 0x00, 0x00, 0x00,                         // next IFD = 0
-      ...str20,                                       // the date string (seg offset 54)
+      ...str20,                                       // the date string (seg offset 66)
     ]);
   };
 
   it("overwrites the EXIF date with the given time, in place", () => {
     const seg = buildExif("2001:01:01 00:00:00");
-    const out = BinarySurgery.refreshExifTimestamp(seg, new Date(2026, 5, 6, 13, 45, 7));
-    expect(readStr(out, 54, 19)).toBe("2026:06:06 13:45:07");
-    expect(out[54 + 19]).toBe(0); // null terminator kept
+    const out = BinarySurgery.sanitizeExifForExport(seg, new Date(2026, 5, 6, 13, 45, 7));
+    expect(readStr(out, 66, 19)).toBe("2026:06:06 13:45:07");
+    expect(out[66 + 19]).toBe(0); // null terminator kept
+  });
+
+  it("resets a rotated Orientation tag to 1 (upright)", () => {
+    const seg = buildExif("2001:01:01 00:00:00", 6); // 6 = rotate 90° CW
+    const out = BinarySurgery.sanitizeExifForExport(seg, new Date());
+    // Orientation inline value sits at segment offset 28 (IFD0 entry start 20 + 8)
+    expect(out[28]).toBe(1);
+    expect(out[29]).toBe(0);
   });
 
   it("does not mutate the input segment", () => {
     const seg = buildExif("2001:01:01 00:00:00");
     const before = arr(seg);
-    BinarySurgery.refreshExifTimestamp(seg, new Date(2026, 0, 1, 0, 0, 0));
+    BinarySurgery.sanitizeExifForExport(seg, new Date(2026, 0, 1, 0, 0, 0));
     expect(arr(seg)).toEqual(before);
   });
 
   it("leaves non-APP1 segments untouched (same reference)", () => {
     const icc = bytes(0xff, 0xe2, 0x00, 0x04, 0xdd, 0xee); // APP2 / ICC
-    expect(BinarySurgery.refreshExifTimestamp(icc, new Date())).toBe(icc);
+    expect(BinarySurgery.sanitizeExifForExport(icc, new Date())).toBe(icc);
   });
 
   it("leaves APP1 segments that are not EXIF untouched (e.g. XMP)", () => {
     const xmp = bytes(0xff, 0xe1, 0x00, 0x08, 0x68, 0x74, 0x74, 0x70, 0x00, 0x00); // "http"
-    expect(BinarySurgery.refreshExifTimestamp(xmp, new Date())).toBe(xmp);
+    expect(BinarySurgery.sanitizeExifForExport(xmp, new Date())).toBe(xmp);
   });
 });
 
