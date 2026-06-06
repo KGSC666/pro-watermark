@@ -62,8 +62,15 @@ export default defineConfig({
     port: 8080,
     hot: true,
   },
-  builtins: {
-    // Rspack 0.5.9 builtins configuration
-    treeShaking: true,
+  // Tree shaking is automatic in production mode on rspack 1.x; the old
+  // `builtins.treeShaking` field was removed in the 0.x -> 1.x migration.
+  optimization: {
+    usedExports: true,
+  },
+  // Silence the bundle-size hints: the single ~3MB bundle (mostly the HEIC
+  // decoder) is a deliberate trade-off — first-load isn't a concern here, so
+  // we don't code-split. rspack 1.x surfaces these hints by default; 0.5 didn't.
+  performance: {
+    hints: false,
   },
 });
