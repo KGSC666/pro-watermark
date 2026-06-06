@@ -3,8 +3,8 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "dev": "rspack serve",
-    "build": "rspack build",
+    "dev": "rspack serve --mode development",
+    "build": "rspack build --mode production",
     "test": "vitest run",
     "test:watch": "vitest"
   },
