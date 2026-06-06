@@ -401,7 +401,7 @@ const App = () => {
                     <label className="text-[10px] font-bold text-neutral-500 uppercase tracking-widest">{t('size')}</label>
                     <span className="text-[10px] font-mono text-white/40">{config.sizePct.toFixed(1)}%</span>
                   </div>
-                  <input type="range" min="1" max="25" step="0.5" value={config.sizePct} onChange={(e) => setConfig({...config, sizePct: parseFloat(e.target.value)})} className="w-full accent-white" />
+                  <input data-vaul-no-drag type="range" min="1" max="25" step="0.5" value={config.sizePct} onChange={(e) => setConfig({...config, sizePct: parseFloat(e.target.value)})} className="w-full accent-white" />
                 </div>
                 <div>
                   <label className="text-[10px] font-bold text-neutral-500 uppercase tracking-widest block mb-3">{t('color')}</label>
@@ -455,7 +455,7 @@ const App = () => {
                 <label className="text-[10px] font-bold text-neutral-500 uppercase tracking-widest">{t('opacity')}</label>
                 <span className="text-[10px] font-mono text-white/40">{Math.round(config.opacity * 100)}%</span>
               </div>
-              <input type="range" min="0" max="1" step="0.01" value={config.opacity} onChange={(e) => setConfig({...config, opacity: parseFloat(e.target.value)})} className="w-full accent-white" />
+              <input data-vaul-no-drag type="range" min="0" max="1" step="0.01" value={config.opacity} onChange={(e) => setConfig({...config, opacity: parseFloat(e.target.value)})} className="w-full accent-white" />
             </section>
 
             <section>
