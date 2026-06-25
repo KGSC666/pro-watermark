@@ -11,9 +11,26 @@ import { X, Pipette, AlertTriangle, Info, Trash2 } from 'lucide-react';
 import { Analytics } from '@vercel/analytics/react';
 import { SpeedInsights } from '@vercel/speed-insights/react';
 import { ErrorBoundary } from '../shared/ui/ErrorBoundary';
+import { Fader } from '../shared/ui/Fader';
+import { AnimatedNumber } from '../shared/ui/AnimatedNumber';
 
 // A snappy spring used for the sliding selection pills (tabs, position grid).
 const PILL_SPRING = { type: 'spring', stiffness: 500, damping: 35 } as const;
+
+// Power-on cascade: the inspector's panels rise in sequence when it mounts
+// (page load on desktop, every drawer-open on mobile) instead of all at once.
+const PANEL_CONTAINER = {
+    hidden: {},
+    show: { transition: { staggerChildren: 0.055, delayChildren: 0.04 } },
+} as const;
+const PANEL_ITEM = {
+    hidden: { opacity: 0, y: 14 },
+    show: {
+        opacity: 1,
+        y: 0,
+        transition: { type: 'spring', stiffness: 440, damping: 34 },
+    },
+} as const;
 
 type Toast = { id: number; message: string; type: 'warn' | 'error' | 'info' };
 const TOAST_TTL_MS = 4200;
@@ -23,7 +40,8 @@ const TOAST_TTL_MS = 4200;
 // a designed micro-moment. The actual save still fires ASAP (see handleExportAll)
 // so it never delays iOS's share-sheet user-activation window.
 const EXPORT_FILL_MS = 900;
-const EXPORT_DONE_HOLD_MS = 480;
+// Hold long enough after the checkmark for the dimensions readout to be read.
+const EXPORT_DONE_HOLD_MS = 950;
 import ExifReader from 'exifreader';
 import { heicTo, isHeic as isHeicContent } from 'heic-to';
 import '../shared/lib/i18n'; // 初始化 i18n
@@ -89,9 +107,18 @@ const App = () => {
         updateActive((s) => ({ ...s, placements: { ...s.placements, [s.config.type]: p } }));
 
     const [isExporting, setIsExporting] = useState(false);
+    // A precise, instrument-style readout shown the instant export completes —
+    // the actual output dimensions + count, decoded from the real output file so
+    // it never lies about what was produced (null until measured).
+    const [exportReadout, setExportReadout] = useState<{ w: number; h: number; n: number } | null>(
+        null,
+    );
     const [toasts, setToasts] = useState<Toast[]>([]);
     // Index of the image awaiting delete confirmation (null = no dialog open).
     const [confirmDeleteIndex, setConfirmDeleteIndex] = useState<number | null>(null);
+    // Whether the source-archive panel shows the full raw EXIF dump or just the
+    // few key specs.
+    const [showAllMeta, setShowAllMeta] = useState(false);
 
     // Lightweight self-dismissing notifications, replacing the bare browser alert().
     const showToast = (message: string, type: Toast['type'] = 'warn') => {
@@ -177,6 +204,7 @@ const App = () => {
         }
         const startedAt = performance.now();
         setExportComplete(false);
+        setExportReadout(null);
         setIsExporting(true);
 
         // Snapshot the image currently on screen FIRST, before any other image is
@@ -227,6 +255,19 @@ const App = () => {
         // iOS only lets navigator.share open from a fresh gesture. The overlay
         // timing below must never gate this.
         if (outFiles.length > 0) await saveFiles(outFiles);
+
+        // Decode the real output to report its true pixel dimensions — proof the
+        // export kept full resolution. Falls back to a plain confirmation if the
+        // decode fails (e.g. an exotic codec), never a fabricated number.
+        if (outFiles.length > 0) {
+            try {
+                const bmp = await createImageBitmap(outFiles[0]);
+                setExportReadout({ w: bmp.width, h: bmp.height, n: outFiles.length });
+                bmp.close?.();
+            } catch {
+                setExportReadout({ w: 0, h: 0, n: outFiles.length });
+            }
+        }
 
         // Turn the overlay into a deliberate moment instead of a flash: let the ring
         // finish filling, then confirm with a checkmark, then dismiss.
@@ -332,6 +373,28 @@ const App = () => {
         showToast(t('image_removed'), 'info');
     };
 
+    // Pull the most useful specs to the top of the source-archive panel; the raw
+    // EXIF dump stays available behind a toggle. Tag names vary by camera, so each
+    // spec tries a few common aliases and is dropped if none are present.
+    const metaPick = (...names: string[]): string | null => {
+        if (!metadata) return null;
+        for (const n of names) if (metadata[n]) return String(metadata[n]);
+        return null;
+    };
+    const keySpecs: [string, string][] = metadata
+        ? (
+              [
+                  ['CAPTURED', metaPick('DateTimeOriginal', 'CreateDate', 'DateTime')],
+                  [
+                      'CAMERA',
+                      [metaPick('Make'), metaPick('Model')].filter(Boolean).join(' ') || null,
+                  ],
+                  ['LENS', metaPick('LensModel', 'Lens', 'LensType')],
+                  ['COLOR', metaPick('ColorSpace', 'Color Space', 'ProfileDescription')],
+              ] as [string, string | null][]
+          ).filter((e): e is [string, string] => !!e[1])
+        : [];
+
     return (
         <>
             <input
@@ -371,10 +434,36 @@ const App = () => {
                     />
                 }
                 controls={
-                    <div className="flex flex-col gap-6 overflow-x-hidden">
+                    <motion.div
+                        variants={PANEL_CONTAINER}
+                        initial="hidden"
+                        animate="show"
+                        className="flex flex-col gap-6"
+                    >
+                        {/* 状态行：让面板读起来像仪表盘——当前正在编辑第几张 / 共几张 + 文件名。 */}
+                        <motion.div
+                            variants={PANEL_ITEM}
+                            className="flex items-center justify-between gap-3 font-data text-[10px] uppercase tracking-wider -mb-1"
+                        >
+                            <span className="text-white/40">
+                                {hasImages
+                                    ? `EDITING ${String(currentIndex + 1).padStart(2, '0')} / ${String(sourceFiles.length).padStart(2, '0')}`
+                                    : 'DRAFT MODE'}
+                            </span>
+                            <span className="truncate max-w-[150px] text-[#FFB020]/70">
+                                {hasImages
+                                    ? (originalNames[currentIndex] ??
+                                      sourceFiles[currentIndex].name)
+                                    : '—'}
+                            </span>
+                        </motion.div>
+
                         {sourceFiles.length > 0 && (
-                            <div className="p-3 bg-white/5 rounded-2xl border border-white/5 mb-2">
-                                <p className="text-[10px] font-bold text-neutral-500 uppercase mb-2 tracking-widest">
+                            <motion.div
+                                variants={PANEL_ITEM}
+                                className="p-3 bg-white/5 rounded-2xl border border-white/5 mb-2"
+                            >
+                                <p className="font-data text-[10px] font-semibold text-neutral-500 uppercase mb-2 tracking-widest">
                                     {t('batch_queue')} ({sourceFiles.length})
                                 </p>
                                 <div className="flex gap-2.5 overflow-x-auto pb-2 pt-2.5 px-2.5 scrollbar-hide">
@@ -391,7 +480,7 @@ const App = () => {
                                             >
                                                 <button
                                                     onClick={() => setCurrentIndex(i)}
-                                                    className={`w-10 h-10 rounded-lg block border-2 overflow-hidden transition-all ${currentIndex === i ? 'border-white' : 'border-transparent opacity-40 hover:opacity-70'}`}
+                                                    className={`w-10 h-10 rounded-lg block border-2 overflow-hidden transition-all ${currentIndex === i ? 'border-[#FFB020] shadow-[0_0_10px_rgba(255,176,32,0.45)]' : 'border-transparent opacity-40 hover:opacity-70'}`}
                                                 >
                                                     {previews[i] ? (
                                                         <img
@@ -416,21 +505,24 @@ const App = () => {
                                         ))}
                                     </AnimatePresence>
                                 </div>
-                            </div>
+                            </motion.div>
                         )}
 
-                        <div className="flex p-1 bg-white/5 rounded-xl border border-white/5">
+                        <motion.div
+                            variants={PANEL_ITEM}
+                            className="flex p-1 bg-white/5 rounded-xl border border-white/5"
+                        >
                             {(['text', 'image'] as const).map((tp) => (
                                 <button
                                     key={tp}
                                     onClick={() => setConfig({ ...config, type: tp })}
-                                    className={`relative flex-1 py-2 rounded-lg text-xs font-semibold transition-colors ${config.type === tp ? 'text-black' : 'text-neutral-500 hover:text-neutral-300'}`}
+                                    className={`relative flex-1 py-2 rounded-lg font-data text-xs font-semibold uppercase tracking-wider transition-colors ${config.type === tp ? 'text-[#FFB020]' : 'text-neutral-500 hover:text-neutral-300'}`}
                                 >
                                     {config.type === tp && (
                                         <motion.span
                                             layoutId="tab-pill"
                                             transition={PILL_SPRING}
-                                            className="absolute inset-0 bg-white rounded-lg shadow-lg"
+                                            className="absolute inset-0 bg-[#FFB020]/12 border border-[#FFB020]/40 rounded-lg"
                                         />
                                     )}
                                     <span className="relative z-10">
@@ -438,250 +530,322 @@ const App = () => {
                                     </span>
                                 </button>
                             ))}
-                        </div>
+                        </motion.div>
 
-                        <AnimatePresence mode="wait" initial={false}>
-                            <motion.section
-                                key={config.type}
-                                initial={{ opacity: 0, x: 10 }}
-                                animate={{ opacity: 1, x: 0 }}
-                                exit={{ opacity: 0, x: -10 }}
-                                transition={{ duration: 0.2, ease: [0.32, 0.72, 0, 1] }}
-                            >
-                                {config.type === 'text' ? (
-                                    <div className="space-y-5">
-                                        <div>
-                                            <label className="text-[10px] font-bold text-neutral-500 uppercase block mb-2 tracking-widest">
-                                                {t('watermark_text')}
-                                            </label>
-                                            <input
-                                                type="text"
-                                                value={config.text}
-                                                onChange={(e) =>
-                                                    setConfig({ ...config, text: e.target.value })
-                                                }
-                                                className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-white/30 focus:ring-2 focus:ring-white/10 focus:bg-white/[0.07] transition-[border-color,box-shadow,background-color] duration-200"
-                                                placeholder={t('placeholder')}
-                                            />
-                                        </div>
-                                        <div>
-                                            <div className="flex justify-between mb-2">
-                                                <label className="text-[10px] font-bold text-neutral-500 uppercase tracking-widest">
-                                                    {t('size')}
+                        <motion.div variants={PANEL_ITEM}>
+                            <AnimatePresence mode="wait" initial={false}>
+                                <motion.section
+                                    key={config.type}
+                                    initial={{ opacity: 0, y: 8, filter: 'blur(6px)' }}
+                                    animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
+                                    exit={{ opacity: 0, y: -8, filter: 'blur(6px)' }}
+                                    transition={{ duration: 0.28, ease: [0.32, 0.72, 0, 1] }}
+                                >
+                                    {config.type === 'text' ? (
+                                        <div className="space-y-5">
+                                            <div>
+                                                <label className="font-data text-[10px] font-semibold text-neutral-500 uppercase block mb-2 tracking-widest">
+                                                    {t('watermark_text')}
                                                 </label>
-                                                <span className="text-[10px] font-mono text-white/40">
-                                                    {config.sizePct.toFixed(1)}%
-                                                </span>
-                                            </div>
-                                            <input
-                                                data-vaul-no-drag
-                                                onPointerDown={(e) => e.stopPropagation()}
-                                                type="range"
-                                                min="1"
-                                                max="25"
-                                                step="0.5"
-                                                value={config.sizePct}
-                                                onChange={(e) =>
-                                                    setConfig({
-                                                        ...config,
-                                                        sizePct: parseFloat(e.target.value),
-                                                    })
-                                                }
-                                                className="w-full accent-white"
-                                            />
-                                        </div>
-                                        <div>
-                                            <label className="text-[10px] font-bold text-neutral-500 uppercase tracking-widest block mb-3">
-                                                {t('color')}
-                                            </label>
-                                            <div className="flex items-center justify-between bg-white/[0.08] rounded-full px-4 py-2.5 border border-white/5">
-                                                {COLOR_PRESETS.map((c) => {
-                                                    const selected =
-                                                        config.color.toUpperCase() === c;
-                                                    return (
-                                                        <button
-                                                            key={c}
-                                                            onClick={() =>
-                                                                setConfig({ ...config, color: c })
-                                                            }
-                                                            className={`w-7 h-7 rounded-full transition-all active:scale-90 ${selected ? 'p-[4px] ring-2 ring-inset ring-white' : 'ring-1 ring-inset ring-white/20 hover:ring-white/50'}`}
-                                                        >
-                                                            <span
-                                                                className="block w-full h-full rounded-full"
-                                                                style={{ backgroundColor: c }}
-                                                            />
-                                                        </button>
-                                                    );
-                                                })}
-                                                <label
-                                                    title={t('custom_color')}
-                                                    className={`relative w-7 h-7 rounded-full cursor-pointer flex items-center justify-center transition-all active:scale-90 ${isCustomColor ? 'p-[4px] ring-2 ring-inset ring-white' : 'ring-1 ring-inset ring-white/20 hover:ring-white/50'}`}
-                                                >
-                                                    <span
-                                                        className="block w-full h-full rounded-full"
-                                                        style={{
-                                                            backgroundColor: isCustomColor
-                                                                ? config.color
-                                                                : 'rgba(255,255,255,0.06)',
-                                                        }}
-                                                    />
-                                                    <Pipette
-                                                        size={12}
-                                                        strokeWidth={2}
-                                                        className="absolute text-white mix-blend-difference pointer-events-none"
-                                                    />
-                                                    <input
-                                                        type="color"
-                                                        value={config.color}
-                                                        onChange={(e) =>
-                                                            setConfig({
-                                                                ...config,
-                                                                color: e.target.value,
-                                                            })
-                                                        }
-                                                        className="absolute inset-0 w-full h-full opacity-0 cursor-pointer rounded-full"
-                                                    />
-                                                </label>
-                                            </div>
-                                        </div>
-                                    </div>
-                                ) : (
-                                    <div>
-                                        <label className="text-[10px] font-bold text-neutral-500 uppercase block mb-2 tracking-widest">
-                                            {t('upload_logo')}
-                                        </label>
-                                        <div className="relative">
-                                            <button
-                                                onClick={() => logoInputRef.current?.click()}
-                                                className="w-full py-8 border-2 border-dashed border-white/10 rounded-2xl flex flex-col items-center gap-2 hover:bg-white/5 transition-all"
-                                            >
-                                                {config.image ? (
-                                                    <img
-                                                        src={config.image}
-                                                        className="h-12 object-contain"
-                                                        alt="Logo"
-                                                    />
-                                                ) : (
-                                                    <>
-                                                        <div className="w-10 h-10 bg-white/5 rounded-full flex items-center justify-center text-neutral-500">
-                                                            +
-                                                        </div>
-                                                        <span className="text-xs text-neutral-600">
-                                                            {t('click_to_select')}
-                                                        </span>
-                                                    </>
-                                                )}
-                                            </button>
-                                            {config.image && (
-                                                <button
-                                                    onClick={() =>
-                                                        setConfig({ ...config, image: null })
+                                                <input
+                                                    type="text"
+                                                    value={config.text}
+                                                    onChange={(e) =>
+                                                        setConfig({
+                                                            ...config,
+                                                            text: e.target.value,
+                                                        })
                                                     }
-                                                    className="absolute top-2 right-2 w-7 h-7 rounded-full bg-black/60 backdrop-blur border border-white/10 flex items-center justify-center text-white/70 hover:text-white hover:bg-red-500/80 transition-all active:scale-90"
-                                                >
-                                                    <X size={14} />
-                                                </button>
-                                            )}
+                                                    className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-white/30 focus:ring-2 focus:ring-white/10 focus:bg-white/[0.07] transition-[border-color,box-shadow,background-color] duration-200"
+                                                    placeholder={t('placeholder')}
+                                                />
+                                            </div>
+                                            <Fader
+                                                label={t('size')}
+                                                value={config.sizePct}
+                                                min={1}
+                                                max={25}
+                                                step={0.5}
+                                                onChange={(v) =>
+                                                    setConfig({ ...config, sizePct: v })
+                                                }
+                                                format={(v) => `${v.toFixed(1)}%`}
+                                            />
+                                            <div>
+                                                <div className="flex justify-between items-center mb-3">
+                                                    <label className="font-data text-[10px] font-semibold text-neutral-500 uppercase tracking-widest">
+                                                        {t('color')}
+                                                    </label>
+                                                    <span className="font-data text-[10px] uppercase tracking-wider text-[#FFB020]/80">
+                                                        {config.color.toUpperCase()}
+                                                    </span>
+                                                </div>
+                                                <div className="flex items-center gap-2">
+                                                    {COLOR_PRESETS.map((c) => {
+                                                        const selected =
+                                                            config.color.toUpperCase() === c;
+                                                        return (
+                                                            <button
+                                                                key={c}
+                                                                onClick={() =>
+                                                                    setConfig({
+                                                                        ...config,
+                                                                        color: c,
+                                                                    })
+                                                                }
+                                                                className={`h-8 w-8 rounded-md transition-all active:scale-90 ${selected ? 'p-[3px] ring-2 ring-inset ring-[#FFB020]' : 'ring-1 ring-inset ring-white/15 hover:ring-white/40'}`}
+                                                            >
+                                                                <span
+                                                                    className="block w-full h-full rounded-[3px]"
+                                                                    style={{ backgroundColor: c }}
+                                                                />
+                                                            </button>
+                                                        );
+                                                    })}
+                                                    <label
+                                                        title={t('custom_color')}
+                                                        className={`relative h-8 w-8 rounded-md cursor-pointer flex items-center justify-center transition-all active:scale-90 ${isCustomColor ? 'p-[3px] ring-2 ring-inset ring-[#FFB020]' : 'ring-1 ring-inset ring-white/15 hover:ring-white/40'}`}
+                                                    >
+                                                        <span
+                                                            className="block w-full h-full rounded-[3px]"
+                                                            style={{
+                                                                backgroundColor: isCustomColor
+                                                                    ? config.color
+                                                                    : 'rgba(255,255,255,0.06)',
+                                                            }}
+                                                        />
+                                                        <Pipette
+                                                            size={12}
+                                                            strokeWidth={2}
+                                                            className="absolute text-white mix-blend-difference pointer-events-none"
+                                                        />
+                                                        <input
+                                                            type="color"
+                                                            value={config.color}
+                                                            onChange={(e) =>
+                                                                setConfig({
+                                                                    ...config,
+                                                                    color: e.target.value,
+                                                                })
+                                                            }
+                                                            className="absolute inset-0 w-full h-full opacity-0 cursor-pointer rounded-md"
+                                                        />
+                                                    </label>
+                                                    <div className="ml-auto h-8 flex-1 max-w-[96px] rounded-md border border-white/10 flex items-center justify-center bg-black/20">
+                                                        <span
+                                                            className="block h-3.5 w-[80%] rounded-sm"
+                                                            style={{
+                                                                backgroundColor: config.color,
+                                                            }}
+                                                        />
+                                                    </div>
+                                                </div>
+                                            </div>
                                         </div>
-                                    </div>
-                                )}
-                            </motion.section>
-                        </AnimatePresence>
+                                    ) : (
+                                        <div>
+                                            <label className="font-data text-[10px] font-semibold text-neutral-500 uppercase block mb-2 tracking-widest">
+                                                {t('upload_logo')}
+                                            </label>
+                                            <div className="relative">
+                                                <button
+                                                    onClick={() => logoInputRef.current?.click()}
+                                                    className="w-full py-8 border-2 border-dashed border-white/10 rounded-2xl flex flex-col items-center gap-2 hover:bg-white/5 transition-all"
+                                                >
+                                                    {config.image ? (
+                                                        <img
+                                                            src={config.image}
+                                                            className="h-12 object-contain"
+                                                            alt="Logo"
+                                                        />
+                                                    ) : (
+                                                        <>
+                                                            <div className="w-10 h-10 bg-white/5 rounded-full flex items-center justify-center text-neutral-500">
+                                                                +
+                                                            </div>
+                                                            <span className="text-xs text-neutral-600">
+                                                                {t('click_to_select')}
+                                                            </span>
+                                                        </>
+                                                    )}
+                                                </button>
+                                                {config.image && (
+                                                    <button
+                                                        onClick={() =>
+                                                            setConfig({ ...config, image: null })
+                                                        }
+                                                        className="absolute top-2 right-2 w-7 h-7 rounded-full bg-black/60 backdrop-blur border border-white/10 flex items-center justify-center text-white/70 hover:text-white hover:bg-red-500/80 transition-all active:scale-90"
+                                                    >
+                                                        <X size={14} />
+                                                    </button>
+                                                )}
+                                            </div>
+                                        </div>
+                                    )}
+                                </motion.section>
+                            </AnimatePresence>
+                        </motion.div>
 
-                        <section>
-                            <div className="flex justify-between mb-2">
-                                <label className="text-[10px] font-bold text-neutral-500 uppercase tracking-widest">
-                                    {t('opacity')}
-                                </label>
-                                <span className="text-[10px] font-mono text-white/40">
-                                    {Math.round(config.opacity * 100)}%
-                                </span>
-                            </div>
-                            <input
-                                data-vaul-no-drag
-                                onPointerDown={(e) => e.stopPropagation()}
-                                type="range"
-                                min="0"
-                                max="1"
-                                step="0.01"
+                        <motion.section
+                            variants={PANEL_ITEM}
+                            className="border-t border-white/[0.06] pt-5"
+                        >
+                            <Fader
+                                label={t('opacity')}
                                 value={config.opacity}
-                                onChange={(e) =>
-                                    setConfig({ ...config, opacity: parseFloat(e.target.value) })
-                                }
-                                className="w-full accent-white"
+                                min={0}
+                                max={1}
+                                step={0.01}
+                                onChange={(v) => setConfig({ ...config, opacity: v })}
+                                format={(v) => `${Math.round(v * 100)}%`}
                             />
-                        </section>
+                        </motion.section>
 
-                        <section>
+                        <motion.section
+                            variants={PANEL_ITEM}
+                            className="border-t border-white/[0.06] pt-5"
+                        >
                             <div className="flex justify-between items-center mb-4">
-                                <label className="text-[10px] font-bold text-neutral-500 uppercase tracking-widest">
+                                <label className="font-data text-[10px] font-semibold text-neutral-500 uppercase tracking-widest">
                                     {t('position')}
                                 </label>
                                 {activePlacement.preset === null && (
-                                    <span className="text-[10px] font-mono text-white/40">
+                                    <span className="font-data text-[10px] text-[#FFB020]/80">
                                         {t('position_custom')}
                                     </span>
                                 )}
                             </div>
-                            <div className="grid grid-cols-3 gap-2 bg-white/5 p-2 rounded-2xl border border-white/5">
-                                {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((i) => {
-                                    const selected = activePlacement.preset === i;
-                                    return (
-                                        <button
-                                            key={i}
-                                            onClick={() =>
-                                                setActivePlacement({
-                                                    ...activePlacement,
-                                                    preset: i,
-                                                    rel: null,
-                                                })
-                                            }
-                                            className="relative aspect-square rounded-lg flex items-center justify-center hover:bg-white/5 transition-colors"
-                                        >
-                                            {selected && (
+                            <div className="relative rounded-2xl border border-white/5 bg-white/5 overflow-hidden">
+                                {hasImages && previews[currentIndex] && (
+                                    <img
+                                        src={previews[currentIndex]}
+                                        alt=""
+                                        className="absolute inset-0 w-full h-full object-cover opacity-[0.18]"
+                                    />
+                                )}
+                                <div className="relative grid grid-cols-3 gap-2 p-2">
+                                    {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((i) => {
+                                        const selected = activePlacement.preset === i;
+                                        return (
+                                            <button
+                                                key={i}
+                                                onClick={() =>
+                                                    setActivePlacement({
+                                                        ...activePlacement,
+                                                        preset: i,
+                                                        rel: null,
+                                                    })
+                                                }
+                                                className="relative aspect-square rounded-lg flex items-center justify-center hover:bg-white/5 transition-colors"
+                                            >
+                                                {selected && (
+                                                    <motion.div
+                                                        layoutId="preset-sel"
+                                                        transition={PILL_SPRING}
+                                                        className="absolute inset-0 bg-[#FFB020]/10 border border-[#FFB020]/50 rounded-lg shadow-lg"
+                                                    />
+                                                )}
                                                 <motion.div
-                                                    layoutId="preset-sel"
+                                                    animate={{ scale: selected ? 1.4 : 1 }}
                                                     transition={PILL_SPRING}
-                                                    className="absolute inset-0 bg-white/10 border border-white/40 rounded-lg shadow-lg"
+                                                    className={`relative w-1.5 h-1.5 rounded-full ${selected ? 'bg-[#FFB020] shadow-[0_0_8px_rgba(255,176,32,0.8)]' : 'bg-neutral-700'}`}
                                                 />
-                                            )}
-                                            <motion.div
-                                                animate={{ scale: selected ? 1.4 : 1 }}
-                                                transition={PILL_SPRING}
-                                                className={`relative w-1.5 h-1.5 rounded-full ${selected ? 'bg-white' : 'bg-neutral-700'}`}
-                                            />
-                                        </button>
-                                    );
-                                })}
+                                            </button>
+                                        );
+                                    })}
+                                </div>
                             </div>
-                        </section>
+                        </motion.section>
 
                         {sourceFiles.length > 0 && (
-                            <div className="mt-2 p-4 bg-emerald-500/5 rounded-2xl border border-emerald-500/10 text-[10px] text-neutral-500 font-mono space-y-1">
-                                <p className="text-emerald-500 font-bold mb-1 uppercase">
-                                    {t('source_verified')}
-                                </p>
-                                <p className="truncate">
-                                    NAME:{' '}
-                                    {originalNames[currentIndex] ?? sourceFiles[currentIndex].name}
-                                </p>
-                                {metadata && (
-                                    <div className="mt-4 pt-4 border-t border-emerald-500/10 space-y-1 max-h-[220px] overflow-y-auto scrollbar-hide pr-1">
-                                        {Object.entries(metadata).map(([key, val]) => (
-                                            <p key={key} className="flex justify-between gap-4">
-                                                <span className="text-emerald-500/60 shrink-0">
-                                                    {key}:
+                            <motion.div
+                                variants={PANEL_ITEM}
+                                className="mt-2 rounded-2xl border border-white/[0.07] bg-white/[0.02] overflow-hidden"
+                            >
+                                {/* 仪表盘式"原片档案"：绿色 LED 表示元数据完整性已锁定，
+                                    下方按规格表排版逐项读出 EXIF/ICC。 */}
+                                <div className="flex items-center gap-2 px-4 py-3 border-b border-white/[0.07] bg-emerald-500/[0.06]">
+                                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.9)]" />
+                                    <span className="font-data text-[10px] font-semibold uppercase tracking-[0.22em] text-emerald-400">
+                                        {t('source_verified')}
+                                    </span>
+                                </div>
+                                <div className="px-4 py-3 font-data text-[10px]">
+                                    {/* 关键规格置顶：文件名 + 拍摄时间 / 相机 / 镜头 / 色彩空间。 */}
+                                    <div className="space-y-1.5">
+                                        <div className="flex justify-between gap-4">
+                                            <span className="text-white/30 shrink-0">NAME</span>
+                                            <span className="truncate text-white/85">
+                                                {originalNames[currentIndex] ??
+                                                    sourceFiles[currentIndex].name}
+                                            </span>
+                                        </div>
+                                        {keySpecs.map(([label, val]) => (
+                                            <div key={label} className="flex justify-between gap-4">
+                                                <span className="text-white/30 shrink-0">
+                                                    {label}
                                                 </span>
-                                                <span className="truncate text-white/60">
-                                                    {val as string}
+                                                <span className="truncate text-white/85">
+                                                    {val}
                                                 </span>
-                                            </p>
+                                            </div>
                                         ))}
                                     </div>
-                                )}
-                            </div>
+
+                                    {/* 其余原始 EXIF/ICC 折叠，避免长列表喧宾夺主。 */}
+                                    {metadata && Object.keys(metadata).length > 0 && (
+                                        <>
+                                            <button
+                                                onClick={() => setShowAllMeta((v) => !v)}
+                                                className="mt-3 flex w-full items-center justify-between border-t border-white/[0.06] pt-2.5 text-white/40 hover:text-white/70 transition-colors"
+                                            >
+                                                <span className="uppercase tracking-wider">
+                                                    {t('meta_all')} ({Object.keys(metadata).length})
+                                                </span>
+                                                <span
+                                                    className={`transition-transform duration-200 ${showAllMeta ? 'rotate-180' : ''}`}
+                                                >
+                                                    ▾
+                                                </span>
+                                            </button>
+                                            <AnimatePresence initial={false}>
+                                                {showAllMeta && (
+                                                    <motion.div
+                                                        initial={{ height: 0, opacity: 0 }}
+                                                        animate={{ height: 'auto', opacity: 1 }}
+                                                        exit={{ height: 0, opacity: 0 }}
+                                                        transition={{
+                                                            duration: 0.25,
+                                                            ease: [0.32, 0.72, 0, 1],
+                                                        }}
+                                                        className="overflow-hidden"
+                                                    >
+                                                        <div className="mt-2 max-h-[220px] overflow-y-auto scrollbar-hide divide-y divide-white/[0.05]">
+                                                            {Object.entries(metadata).map(
+                                                                ([key, val]) => (
+                                                                    <p
+                                                                        key={key}
+                                                                        className="flex justify-between gap-4 py-1"
+                                                                    >
+                                                                        <span className="text-white/30 shrink-0 uppercase">
+                                                                            {key}
+                                                                        </span>
+                                                                        <span className="truncate text-white/60">
+                                                                            {val as string}
+                                                                        </span>
+                                                                    </p>
+                                                                ),
+                                                            )}
+                                                        </div>
+                                                    </motion.div>
+                                                )}
+                                            </AnimatePresence>
+                                        </>
+                                    )}
+                                </div>
+                            </motion.div>
                         )}
-                    </div>
+                    </motion.div>
                 }
             />
 
@@ -691,21 +855,54 @@ const App = () => {
                         initial={{ opacity: 0 }}
                         animate={{ opacity: 1 }}
                         exit={{ opacity: 0 }}
-                        transition={{ duration: 0.2 }}
-                        className="fixed inset-0 z-[100] bg-black/80 backdrop-blur-md flex flex-col items-center justify-center text-center p-8"
+                        transition={{ duration: 0.25 }}
+                        className="fixed inset-0 z-[100] bg-black/85 backdrop-blur-md flex flex-col items-center justify-center text-center p-8 overflow-hidden"
                     >
+                        {/* 影院黑边：开场从中间合拢成上下条幅，收场再打开。 */}
+                        <motion.div
+                            className="absolute inset-x-0 top-0 bg-black z-[1]"
+                            initial={{ height: '50%' }}
+                            animate={{ height: '13%' }}
+                            exit={{ height: '50%' }}
+                            transition={{ duration: 0.5, ease: [0.32, 0.72, 0, 1] }}
+                        />
+                        <motion.div
+                            className="absolute inset-x-0 bottom-0 bg-black z-[1]"
+                            initial={{ height: '50%' }}
+                            animate={{ height: '13%' }}
+                            exit={{ height: '50%' }}
+                            transition={{ duration: 0.5, ease: [0.32, 0.72, 0, 1] }}
+                        />
+                        {/* 处理中：一道琥珀扫描带循环掠过，像正在逐行读取。 */}
+                        {!exportComplete && (
+                            <motion.div
+                                aria-hidden
+                                className="pointer-events-none absolute inset-x-0 h-40 z-[2]"
+                                style={{
+                                    background:
+                                        'linear-gradient(to bottom, transparent, rgba(255,176,32,0.10) 50%, transparent)',
+                                }}
+                                initial={{ top: '-20%' }}
+                                animate={{ top: '110%' }}
+                                transition={{
+                                    duration: 1.2,
+                                    repeat: Number.POSITIVE_INFINITY,
+                                    ease: 'linear',
+                                }}
+                            />
+                        )}
                         <motion.div
                             initial={{ scale: 0.9, opacity: 0, y: 8 }}
                             animate={{ scale: 1, opacity: 1, y: 0 }}
-                            transition={{ delay: 0.05, ...PILL_SPRING }}
-                            className="flex flex-col items-center"
+                            transition={{ delay: 0.35, ...PILL_SPRING }}
+                            className="relative z-[3] flex flex-col items-center"
                         >
                             <div className="relative w-24 h-24 mb-5">
                                 <svg className="w-24 h-24 -rotate-90" viewBox="0 0 80 80">
                                     <defs>
                                         <linearGradient id="exportRing" x1="0" y1="0" x2="1" y2="1">
-                                            <stop offset="0%" stopColor="#818cf8" />
-                                            <stop offset="100%" stopColor="#38bdf8" />
+                                            <stop offset="0%" stopColor="#FFD27A" />
+                                            <stop offset="100%" stopColor="#FFB020" />
                                         </linearGradient>
                                     </defs>
                                     <circle
@@ -737,7 +934,7 @@ const App = () => {
                                             ease: [0.32, 0.72, 0, 1],
                                         }}
                                         style={{
-                                            filter: 'drop-shadow(0 0 5px rgba(99,102,241,0.6))',
+                                            filter: 'drop-shadow(0 0 5px rgba(255,176,32,0.6))',
                                         }}
                                     />
                                 </svg>
@@ -753,7 +950,7 @@ const App = () => {
                                                 exit={{ scale: 0.4, opacity: 0 }}
                                                 transition={PILL_SPRING}
                                                 style={{
-                                                    filter: 'drop-shadow(0 0 5px rgba(56,189,248,0.55))',
+                                                    filter: 'drop-shadow(0 0 5px rgba(255,176,32,0.55))',
                                                 }}
                                             >
                                                 <motion.path
@@ -776,9 +973,45 @@ const App = () => {
                                     </AnimatePresence>
                                 </div>
                             </div>
-                            <p className="text-lg font-extrabold tracking-tight bg-gradient-to-b from-white to-white/55 bg-clip-text text-transparent">
+                            <p className="font-display text-xl font-bold tracking-tight bg-gradient-to-b from-white to-white/55 bg-clip-text text-transparent">
                                 {exportComplete ? t('export_done') : t('processing')}
                             </p>
+                            <div className="h-5 mt-2">
+                                <AnimatePresence>
+                                    {exportComplete && exportReadout && (
+                                        <motion.p
+                                            initial={{ opacity: 0, y: 4 }}
+                                            animate={{ opacity: 1, y: 0 }}
+                                            exit={{ opacity: 0 }}
+                                            transition={{ delay: 0.1, duration: 0.25 }}
+                                            className="font-data text-[11px] tracking-wider text-[#FFB020]/90 tabular-nums"
+                                        >
+                                            {exportReadout.w > 0 && (
+                                                <>
+                                                    <AnimatedNumber
+                                                        value={exportReadout.w}
+                                                        startFrom={0}
+                                                        duration={0.8}
+                                                    />
+                                                    <span className="text-[#FFB020]/40"> × </span>
+                                                    <AnimatedNumber
+                                                        value={exportReadout.h}
+                                                        startFrom={0}
+                                                        duration={0.8}
+                                                    />
+                                                    <span className="text-[#FFB020]/50">
+                                                        {' '}
+                                                        px ·{' '}
+                                                    </span>
+                                                </>
+                                            )}
+                                            {exportReadout.n > 1 &&
+                                                `${exportReadout.n} ${t('imgs')} · `}
+                                            {t('meta_intact')}
+                                        </motion.p>
+                                    )}
+                                </AnimatePresence>
+                            </div>
                         </motion.div>
                     </motion.div>
                 )}

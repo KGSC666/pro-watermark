@@ -4,12 +4,23 @@
 
 :root {
   color-scheme: dark;
+  --accent: #ffb020;
 }
 
 body {
-  background-color: black;
+  background-color: #09090b;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+/* 仪表数据字体：等宽，承载所有标签、数值、读数，奠定"精密仪器"气质 */
+.font-data {
+  font-family: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+}
+
+/* 展示字体：有态度的几何 grotesk，用于标题与品牌字标，给版面以人格 */
+.font-display {
+  font-family: 'Space Grotesk', 'Inter', system-ui, sans-serif;
 }
 
 /* 隐藏移动端滚动条，保持纯净感 */
@@ -21,11 +32,54 @@ body {
   scrollbar-width: none;
 }
 
-
-input[type="range"] {
-  @apply h-1 bg-white/20 rounded-full appearance-none outline-none;
+/* 全站可见的键盘聚焦环——专业工具的基本素养 */
+*:focus-visible {
+  outline: 2px solid rgba(255, 176, 32, 0.7);
+  outline-offset: 2px;
+  border-radius: 4px;
 }
 
-input[type="range"]::-webkit-slider-thumb {
-  @apply w-4 h-4 bg-white rounded-full appearance-none cursor-pointer shadow-xl border-4 border-black/20;
+/* 极细噪点纹理，替代会和照片抢戏的极光光晕，给暗背景以胶片般的纵深 */
+.grain::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  opacity: 0.035;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+/* 仪表推子：细轨 + 琥珀填充（由组件按数值注入 --fill）+ 精确滑块 */
+input[type='range'] {
+  @apply h-1.5 appearance-none rounded-full outline-none;
+  background: linear-gradient(
+    to right,
+    var(--accent) 0%,
+    var(--accent) var(--fill, 50%),
+    rgba(255, 255, 255, 0.12) var(--fill, 50%),
+    rgba(255, 255, 255, 0.12) 100%
+  );
+}
+
+input[type='range']::-webkit-slider-thumb {
+  @apply h-4 w-4 cursor-pointer appearance-none rounded-full;
+  background: #fafafa;
+  box-shadow:
+    0 0 0 4px rgba(9, 9, 11, 0.9),
+    0 0 10px rgba(255, 176, 32, 0.55);
+  transition: box-shadow 0.15s ease;
+}
+
+input[type='range']:active::-webkit-slider-thumb {
+  box-shadow:
+    0 0 0 3px rgba(9, 9, 11, 0.9),
+    0 0 0 7px rgba(255, 176, 32, 0.25),
+    0 0 14px rgba(255, 176, 32, 0.7);
+}
+
+input[type='range']::-moz-range-thumb {
+  @apply h-4 w-4 cursor-pointer rounded-full border-0;
+  background: #fafafa;
+  box-shadow: 0 0 0 4px rgba(9, 9, 11, 0.9), 0 0 10px rgba(255, 176, 32, 0.55);
 }

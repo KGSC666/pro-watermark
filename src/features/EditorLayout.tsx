@@ -81,21 +81,17 @@ export const EditorLayout: React.FC<EditorLayoutProps> = ({
             onDragOver={(e) => e.preventDefault()}
             onDragLeave={handleDragLeave}
             onDrop={handleDrop}
-            className="relative flex h-screen w-full bg-black overflow-hidden font-sans antialiased text-white selection:bg-white/20"
+            className="grain relative flex h-[100dvh] w-full bg-[#09090B] overflow-hidden font-sans antialiased text-white selection:bg-[#FFB020]/25"
         >
-            {/* 极光氛围背景：缓慢漂移的模糊色光，只在边缘透出，营造高级纵深感 */}
-            <div className="absolute inset-0 z-0 overflow-hidden pointer-events-none">
-                <motion.div
-                    className="absolute -top-1/3 -left-1/4 w-[55vw] h-[55vw] rounded-full bg-indigo-600/20 blur-[130px]"
-                    animate={{ x: [0, 90, 0], y: [0, 50, 0], scale: [1, 1.15, 1] }}
-                    transition={{ duration: 24, repeat: Infinity, ease: 'easeInOut' }}
-                />
-                <motion.div
-                    className="absolute -bottom-1/3 -right-1/4 w-[50vw] h-[50vw] rounded-full bg-sky-500/15 blur-[130px]"
-                    animate={{ x: [0, -70, 0], y: [0, -60, 0], scale: [1, 1.2, 1] }}
-                    transition={{ duration: 30, repeat: Infinity, ease: 'easeInOut' }}
-                />
-            </div>
+            {/* 静默的暗背景：胶片噪点（.grain）+ 一束极淡的暖色顶光暗角，给纵深而不与
+                照片抢戏。氛围由"安静 + 质感"承载，不再用漂浮的极光色块。 */}
+            <div
+                className="absolute inset-0 z-0 pointer-events-none"
+                style={{
+                    background:
+                        'radial-gradient(120% 80% at 50% -10%, rgba(255,176,32,0.05), transparent 55%), radial-gradient(100% 100% at 50% 120%, rgba(0,0,0,0.6), transparent 60%)',
+                }}
+            />
 
             <AnimatePresence>
                 {dragging && (
@@ -104,23 +100,23 @@ export const EditorLayout: React.FC<EditorLayoutProps> = ({
                         animate={{ opacity: 1, scale: 1 }}
                         exit={{ opacity: 0, scale: 1.02 }}
                         transition={{ duration: 0.18 }}
-                        className="fixed inset-3 z-[80] bg-black/70 backdrop-blur-md rounded-[40px] border-4 border-dashed border-white/20 flex flex-col items-center justify-center pointer-events-none"
+                        className="fixed inset-3 z-[80] bg-black/70 backdrop-blur-md rounded-[40px] border-2 border-dashed border-[#FFB020]/45 flex flex-col items-center justify-center pointer-events-none"
                     >
-                        <Plus size={40} className="text-white/60 mb-4" />
+                        <Plus size={40} className="text-[#FFB020]/80 mb-4" />
                         <p className="text-lg font-semibold text-white/80">{t('drop_to_add')}</p>
                     </motion.div>
                 )}
             </AnimatePresence>
 
             <main className="flex-1 relative flex items-center justify-center min-w-0 transition-all duration-500">
-                <div className="w-full h-full p-4 md:p-12 lg:p-20 flex items-center justify-center relative overflow-hidden">
+                <div className="w-full h-full px-4 pt-20 pb-28 md:p-12 lg:p-20 flex items-center justify-center relative overflow-hidden">
                     <div className="w-full h-full max-w-[1400px] max-h-[1000px] relative">
                         {canvas}
                     </div>
                 </div>
 
                 {isDesktop && (
-                    <div className="absolute top-6 left-1/2 -translate-x-1/2 flex items-center gap-2 p-1.5 bg-white/[0.03] backdrop-blur-2xl border border-white/10 rounded-2xl shadow-2xl z-20">
+                    <div className="absolute top-6 left-1/2 -translate-x-1/2 flex items-center gap-2 p-1.5 bg-[#101013]/90 backdrop-blur-xl border border-white/10 rounded-2xl shadow-2xl z-20">
                         <button
                             onClick={onAdd}
                             title="Add Image"
@@ -183,7 +179,7 @@ export const EditorLayout: React.FC<EditorLayoutProps> = ({
 
                 {/* 移动端顶部工具条：添加 + 导出 */}
                 {!isDesktop && (
-                    <div className="fixed top-4 left-1/2 -translate-x-1/2 flex items-center gap-2 p-1.5 bg-white/[0.03] backdrop-blur-2xl border border-white/10 rounded-2xl shadow-2xl z-40">
+                    <div className="fixed top-4 left-1/2 -translate-x-1/2 flex items-center gap-2 p-1.5 bg-[#101013]/90 backdrop-blur-xl border border-white/10 rounded-2xl shadow-2xl z-40">
                         <button
                             onClick={onAdd}
                             title={t('add_image')}
@@ -204,7 +200,7 @@ export const EditorLayout: React.FC<EditorLayoutProps> = ({
 
             {isDesktop ? (
                 <aside
-                    className={`h-full bg-neutral-900/40 backdrop-blur-3xl border-l border-white/5 flex flex-col shadow-[-10px_0_30px_rgba(0,0,0,0.5)] overflow-hidden z-10 transition-all duration-500 ease-[cubic-bezier(0.32,0.72,0,1)] ${
+                    className={`h-full bg-[#0C0C0E]/95 backdrop-blur-xl border-l border-white/[0.07] flex flex-col shadow-[-10px_0_30px_rgba(0,0,0,0.5)] overflow-hidden z-10 transition-all duration-500 ease-[cubic-bezier(0.32,0.72,0,1)] ${
                         showSidebar
                             ? 'w-[320px] opacity-100 translate-x-0'
                             : 'w-0 opacity-0 translate-x-20'
@@ -212,7 +208,8 @@ export const EditorLayout: React.FC<EditorLayoutProps> = ({
                 >
                     <div className="w-[320px] p-8 flex flex-col gap-8 h-full">
                         <div className="flex items-center justify-between shrink-0">
-                            <h2 className="text-xl font-bold tracking-tight text-white/90">
+                            <h2 className="font-data text-[11px] font-medium uppercase tracking-[0.32em] text-white/80 flex items-center gap-2.5">
+                                <span className="w-1.5 h-1.5 rounded-full bg-[#FFB020] shadow-[0_0_8px_rgba(255,176,32,0.8)]" />
                                 {t('inspector')}
                             </h2>
                             <button
@@ -222,7 +219,9 @@ export const EditorLayout: React.FC<EditorLayoutProps> = ({
                                 <ChevronRight size={20} />
                             </button>
                         </div>
-                        <div className="flex-1 overflow-y-auto scrollbar-hide pr-1">{controls}</div>
+                        <div className="flex-1 overflow-y-auto overflow-x-hidden scrollbar-hide px-3 -mx-3">
+                            {controls}
+                        </div>
                     </div>
                 </aside>
             ) : (
@@ -237,7 +236,7 @@ export const EditorLayout: React.FC<EditorLayoutProps> = ({
                         <Drawer.Content className="bg-neutral-900 flex flex-col rounded-t-[32px] h-[80vh] fixed bottom-0 left-0 right-0 border-t border-white/10 outline-none z-[70]">
                             <div className="mx-auto w-12 h-1.5 rounded-full bg-neutral-800 mt-4 mb-8" />
                             <Drawer.Title className="sr-only">{t('inspector')}</Drawer.Title>
-                            <div className="p-8 overflow-y-auto flex-1 scrollbar-hide">
+                            <div className="p-8 overflow-y-auto overflow-x-hidden flex-1 scrollbar-hide">
                                 <div className="flex gap-2 mb-8">
                                     {languages.map((lang) => (
                                         <button
