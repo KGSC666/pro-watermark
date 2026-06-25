@@ -1,6 +1,6 @@
-import type React from 'react';
 import { useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import * as Slider from '@radix-ui/react-slider';
 import { AnimatePresence, motion } from 'framer-motion';
 
 interface FaderProps {
@@ -14,31 +14,23 @@ interface FaderProps {
     format: (value: number) => string;
 }
 
-const THUMB = 16;
-
 /**
- * An instrument-style fader: an amber-filled track, a glowing precision thumb,
- * and a value bubble that rides above the thumb while dragging.
+ * An instrument-style fader built on Radix Slider — keyboard + ARIA accessible
+ * out of the box — styled with an amber-filled track and a glowing precision
+ * thumb. A value bubble rides above the thumb while dragging; it's portaled to
+ * <body> so the inspector's scroll container can't clip it.
  *
- * The bubble is rendered through a portal to <body> at viewport coordinates, so
- * it's never clipped by the inspector's scroll container (an `overflow` ancestor
- * would otherwise cut off a tooltip that floats above the track).
- *
- * Keeps the mobile fixes from the old inline sliders: `data-vaul-no-drag` plus a
- * pointer-down stop so the bottom drawer doesn't steal the gesture.
+ * Keeps the mobile fixes from the old slider: `data-vaul-no-drag` + a pointer
+ * stop so the bottom drawer doesn't steal the gesture.
  */
 export function Fader({ label, value, min, max, step, onChange, format }: FaderProps) {
-    const inputRef = useRef<HTMLInputElement>(null);
+    const thumbRef = useRef<HTMLSpanElement>(null);
     const [bubble, setBubble] = useState<{ x: number; y: number } | null>(null);
-    const pct = ((value - min) / (max - min)) * 100;
 
-    // Position the bubble over the thumb, in viewport space, for a given value.
-    const placeBubble = (val: number) => {
-        const el = inputRef.current;
-        if (!el) return;
-        const r = el.getBoundingClientRect();
-        const p = (val - min) / (max - min);
-        setBubble({ x: r.left + THUMB / 2 + p * (r.width - THUMB), y: r.top });
+    // Position the bubble over the thumb, in viewport space.
+    const place = () => {
+        const r = thumbRef.current?.getBoundingClientRect();
+        if (r) setBubble({ x: r.left + r.width / 2, y: r.top });
     };
 
     return (
@@ -49,29 +41,34 @@ export function Fader({ label, value, min, max, step, onChange, format }: FaderP
                 </label>
                 <span className="font-data text-[10px] text-[#FFB020]/80">{format(value)}</span>
             </div>
-            <input
-                ref={inputRef}
+            <Slider.Root
                 data-vaul-no-drag
-                type="range"
+                className="relative flex h-4 w-full touch-none select-none items-center"
                 min={min}
                 max={max}
                 step={step}
-                value={value}
-                onChange={(e) => {
-                    const v = parseFloat(e.target.value);
+                value={[value]}
+                onValueChange={([v]) => {
                     onChange(v);
-                    if (bubble) placeBubble(v);
+                    if (bubble) place();
                 }}
                 onPointerDown={(e) => {
                     e.stopPropagation();
-                    placeBubble(value);
+                    requestAnimationFrame(place);
                 }}
                 onPointerUp={() => setBubble(null)}
                 onPointerCancel={() => setBubble(null)}
                 onBlur={() => setBubble(null)}
-                style={{ '--fill': `${pct}%` } as React.CSSProperties}
-                className="w-full"
-            />
+            >
+                <Slider.Track className="relative h-1.5 w-full grow rounded-full bg-white/12">
+                    <Slider.Range className="absolute h-full rounded-full bg-[#FFB020]" />
+                </Slider.Track>
+                <Slider.Thumb
+                    ref={thumbRef}
+                    aria-label={label}
+                    className="block h-4 w-4 rounded-full bg-[#fafafa] shadow-[0_0_0_4px_rgba(9,9,11,0.9),0_0_10px_rgba(255,176,32,0.55)] transition-shadow active:shadow-[0_0_0_3px_rgba(9,9,11,0.9),0_0_0_7px_rgba(255,176,32,0.25),0_0_14px_rgba(255,176,32,0.7)]"
+                />
+            </Slider.Root>
             {bubble &&
                 createPortal(
                     <AnimatePresence>

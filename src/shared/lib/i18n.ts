@@ -41,6 +41,8 @@ const resources = {
             meta_all: 'All metadata',
             imgs: 'images',
             heic_failed: "Couldn't convert these HEIC photos: {{names}}",
+            export_failed_title: 'Some images failed to export',
+            export_partial: "Couldn't export these: {{names}}",
         },
     },
     zh: {
@@ -81,6 +83,8 @@ const resources = {
             meta_all: '全部元数据',
             imgs: '张',
             heic_failed: '无法转换这些 HEIC 照片：{{names}}',
+            export_failed_title: '部分图片导出失败',
+            export_partial: '这些图片导出失败：{{names}}',
         },
     },
     ja: {
@@ -121,6 +125,8 @@ const resources = {
             meta_all: 'すべてのメタデータ',
             imgs: '枚',
             heic_failed: 'これらのHEIC写真を変換できませんでした: {{names}}',
+            export_failed_title: '一部の画像を書き出せませんでした',
+            export_partial: 'これらの書き出しに失敗しました: {{names}}',
         },
     },
 };

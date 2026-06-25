@@ -13,6 +13,12 @@ import {
 } from '../entities/watermark/geometry';
 import { useTranslation } from 'react-i18next';
 
+// Fabric objects we tag with custom flags; typed here so we avoid `as any`.
+type BgImage = FabricImage & { isBackground?: boolean };
+type LogoImage = FabricImage & { _logoSrc?: string };
+const findBg = (canvas: Canvas | null | undefined): BgImage | undefined =>
+    canvas?.getObjects().find((o): o is BgImage => Boolean((o as BgImage).isBackground));
+
 // Fabric easing signature (t=elapsed, b=begin, c=change, d=duration).
 const easeOutCubic = (t: number, b: number, c: number, d: number) => {
     const x = t / d - 1;
@@ -76,10 +82,7 @@ const CanvasEditor = forwardRef<CanvasEditorRef, CanvasEditorProps>(
         // stored as a percentage of this, so the exported size is the same fraction
         // of the photo no matter how big the browser window is.
         const getBgBox = () => {
-            const canvas = fabricCanvas.current;
-            const bg = canvas?.getObjects().find((o) => (o as any).isBackground) as
-                | FabricImage
-                | undefined;
+            const bg = findBg(fabricCanvas.current);
             if (!bg) return null;
             const box = bg.getBoundingRect();
             return { centerX: bg.left!, centerY: bg.top!, width: box.width, height: box.height };
@@ -93,9 +96,7 @@ const CanvasEditor = forwardRef<CanvasEditorRef, CanvasEditorProps>(
         const exportCurrentBlob = async (): Promise<Blob> => {
             if (!fabricCanvas.current) throw new Error('Canvas not initialized');
             const canvas = fabricCanvas.current;
-            const bgImg = canvas
-                .getObjects()
-                .find((obj) => (obj as any).isBackground) as FabricImage;
+            const bgImg = findBg(canvas);
             if (!bgImg) throw new Error('No image loaded');
 
             canvas.discardActiveObject();
@@ -191,9 +192,7 @@ const CanvasEditor = forwardRef<CanvasEditorRef, CanvasEditorProps>(
                 // Re-fit the background image to the new canvas box so it never
                 // overflows when the container shrinks (mobile address-bar collapse,
                 // sidebar toggle, rotation…). The watermark re-fits via resizeTick.
-                const bg = c.getObjects().find((o) => (o as any).isBackground) as
-                    | FabricImage
-                    | undefined;
+                const bg = findBg(c);
                 if (bg?.width && bg?.height) {
                     const scale = Math.min(c.width! / bg.width, c.height! / bg.height) * 0.95;
                     bg.set({
@@ -207,15 +206,13 @@ const CanvasEditor = forwardRef<CanvasEditorRef, CanvasEditorProps>(
                 c.requestRenderAll();
                 setResizeTick((n) => n + 1);
             };
-            window.addEventListener('resize', handleResize);
-            // Layout-driven size changes (padding, sidebar toggle, font load) don't
-            // fire window 'resize'; observe the container directly so the canvas
-            // always matches its box.
+            // Observe the container directly: this catches window resizes AND
+            // layout-driven changes (padding, sidebar toggle, font load, mobile
+            // address-bar collapse) that a window 'resize' listener would miss.
             const ro = new ResizeObserver(() => handleResize());
             ro.observe(containerRef.current);
 
             return () => {
-                window.removeEventListener('resize', handleResize);
                 ro.disconnect();
                 canvas.dispose();
             };
@@ -240,7 +237,7 @@ const CanvasEditor = forwardRef<CanvasEditorRef, CanvasEditorProps>(
                         const scale =
                             Math.min(canvas.width! / img.width!, canvas.height! / img.height!) *
                             0.95;
-                        (img as any).isBackground = true;
+                        (img as BgImage).isBackground = true;
                         img.set({
                             left: canvas.width! / 2,
                             top: canvas.height! / 2,
@@ -280,9 +277,7 @@ const CanvasEditor = forwardRef<CanvasEditorRef, CanvasEditorProps>(
                     if (cancelled) return;
                     setHasImage(true);
                     setSealKey((k) => k + 1);
-                    const bg = fabricCanvas.current
-                        ?.getObjects()
-                        .find((o) => (o as any).isBackground) as FabricImage | undefined;
+                    const bg = findBg(fabricCanvas.current);
                     setDims(bg?.width && bg?.height ? { w: bg.width, h: bg.height } : null);
                     onImageLoad(file);
                     // Re-apply the watermark for the freshly loaded image. The [config]
@@ -309,7 +304,7 @@ const CanvasEditor = forwardRef<CanvasEditorRef, CanvasEditorProps>(
             if (!canvas) return;
             // Gate on the actual background object rather than the React `hasImage`
             // state, which hasn't flushed yet during the load → render sequence.
-            const bg = canvas.getObjects().find((o) => (o as any).isBackground);
+            const bg = findBg(canvas);
             if (!bg) return;
 
             // What the watermark should be right now. The image type shows nothing
@@ -329,7 +324,7 @@ const CanvasEditor = forwardRef<CanvasEditorRef, CanvasEditorProps>(
 
             const isText = watermarkRef.current instanceof IText;
             const isImage = watermarkRef.current instanceof FabricImage;
-            const currentLogoSrc = (watermarkRef.current as any)?._logoSrc;
+            const currentLogoSrc = (watermarkRef.current as LogoImage | null)?._logoSrc;
             const shouldRecreate =
                 !watermarkRef.current ||
                 (wantText && !isText) ||
@@ -359,7 +354,7 @@ const CanvasEditor = forwardRef<CanvasEditorRef, CanvasEditorProps>(
                         originY: 'center',
                         opacity: cfg.opacity,
                     });
-                    (img as any)._logoSrc = cfg.image;
+                    (img as LogoImage)._logoSrc = cfg.image ?? undefined;
                     watermarkRef.current = img;
                 }
                 if (watermarkRef.current) canvas.add(watermarkRef.current);
@@ -514,7 +509,7 @@ const CanvasEditor = forwardRef<CanvasEditorRef, CanvasEditorProps>(
                             variants={BOOT_ITEM}
                             className="font-display text-[2rem] md:text-[2.7rem] font-bold tracking-tight leading-[1.05] text-white/95 max-w-[440px]"
                         >
-                            <ScrambleText text={t('empty_hero')} delay={650} duration={1100} />
+                            <ScrambleText text={t('empty_hero')} delay={650} />
                         </motion.h2>
                         <motion.span
                             variants={BOOT_ITEM}

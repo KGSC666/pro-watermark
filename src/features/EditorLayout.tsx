@@ -1,6 +1,7 @@
 import type React from 'react';
 import { useState, useEffect, useRef } from 'react';
 import { Drawer } from 'vaul';
+import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Settings, Download, Plus, ChevronRight, Globe } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
@@ -21,11 +22,11 @@ export const EditorLayout: React.FC<EditorLayoutProps> = ({
     onDropFiles,
 }) => {
     const { t, i18n } = useTranslation();
-    const [isDesktop, setIsDesktop] = useState(window.innerWidth >= 1024);
+    const [isDesktop, setIsDesktop] = useState(() =>
+        typeof window !== 'undefined' ? window.matchMedia('(min-width: 1024px)').matches : true,
+    );
     const [showSidebar, setShowSidebar] = useState(true);
-    const [showLangMenu, setShowLangMenu] = useState(false);
     const [dragging, setDragging] = useState(false);
-    const langRef = useRef<HTMLDivElement>(null);
     const dragDepth = useRef(0);
 
     const languages = [
@@ -34,29 +35,13 @@ export const EditorLayout: React.FC<EditorLayoutProps> = ({
         { code: 'ja', label: '日本語' },
     ];
 
+    // Track the desktop breakpoint via matchMedia (no manual resize bookkeeping).
     useEffect(() => {
-        const handleResize = () => setIsDesktop(window.innerWidth >= 1024);
-        window.addEventListener('resize', handleResize);
-        return () => window.removeEventListener('resize', handleResize);
+        const mq = window.matchMedia('(min-width: 1024px)');
+        const onChange = () => setIsDesktop(mq.matches);
+        mq.addEventListener('change', onChange);
+        return () => mq.removeEventListener('change', onChange);
     }, []);
-
-    // Close the language menu on outside click or Escape.
-    useEffect(() => {
-        if (!showLangMenu) return;
-        const onDown = (e: MouseEvent) => {
-            if (langRef.current && !langRef.current.contains(e.target as Node))
-                setShowLangMenu(false);
-        };
-        const onKey = (e: KeyboardEvent) => {
-            if (e.key === 'Escape') setShowLangMenu(false);
-        };
-        document.addEventListener('mousedown', onDown);
-        document.addEventListener('keydown', onKey);
-        return () => {
-            document.removeEventListener('mousedown', onDown);
-            document.removeEventListener('keydown', onKey);
-        };
-    }, [showLangMenu]);
 
     const handleDragEnter = (e: React.DragEvent) => {
         if (!Array.from(e.dataTransfer.types).includes('Files')) return;
@@ -125,39 +110,38 @@ export const EditorLayout: React.FC<EditorLayoutProps> = ({
                             <Plus size={20} />
                         </button>
 
-                        {/* 语言切换器 */}
-                        <div className="relative" ref={langRef}>
-                            <button
-                                onClick={() => setShowLangMenu(!showLangMenu)}
-                                className="p-2.5 hover:bg-white/10 rounded-xl transition-all text-white/60 hover:text-white flex items-center gap-2"
-                            >
-                                <Globe size={18} strokeWidth={1.5} />
-                            </button>
-                            <AnimatePresence>
-                                {showLangMenu && (
-                                    <motion.div
-                                        initial={{ opacity: 0, y: -6, scale: 0.96 }}
-                                        animate={{ opacity: 1, y: 0, scale: 1 }}
-                                        exit={{ opacity: 0, y: -6, scale: 0.96 }}
-                                        transition={{ duration: 0.18, ease: [0.32, 0.72, 0, 1] }}
-                                        className="absolute top-full mt-2 left-0 origin-top-left bg-neutral-900 border border-white/10 rounded-xl p-1 shadow-2xl min-w-[120px]"
-                                    >
-                                        {languages.map((lang) => (
-                                            <button
-                                                key={lang.code}
-                                                onClick={() => {
-                                                    i18n.changeLanguage(lang.code);
-                                                    setShowLangMenu(false);
-                                                }}
-                                                className={`w-full text-left px-3 py-2 rounded-lg text-xs transition-colors ${i18n.language.startsWith(lang.code) ? 'bg-white text-black font-bold' : 'hover:bg-white/5 text-neutral-400'}`}
-                                            >
-                                                {lang.label}
-                                            </button>
-                                        ))}
-                                    </motion.div>
-                                )}
-                            </AnimatePresence>
-                        </div>
+                        {/* 语言切换器（Radix DropdownMenu：自带键盘导航 / 外点关闭 / Escape） */}
+                        <DropdownMenu.Root>
+                            <DropdownMenu.Trigger asChild>
+                                <button
+                                    title={t('inspector')}
+                                    className="p-2.5 hover:bg-white/10 rounded-xl transition-all text-white/60 hover:text-white flex items-center gap-2 outline-none"
+                                >
+                                    <Globe size={18} strokeWidth={1.5} />
+                                </button>
+                            </DropdownMenu.Trigger>
+                            <DropdownMenu.Portal>
+                                <DropdownMenu.Content
+                                    align="start"
+                                    sideOffset={8}
+                                    className="z-50 min-w-[120px] origin-top-left rounded-xl border border-white/10 bg-neutral-900 p-1 shadow-2xl data-[state=open]:animate-[toastIn_0.16s_ease-out]"
+                                >
+                                    {languages.map((lang) => (
+                                        <DropdownMenu.Item
+                                            key={lang.code}
+                                            onSelect={() => i18n.changeLanguage(lang.code)}
+                                            className={`w-full cursor-pointer rounded-lg px-3 py-2 text-xs outline-none transition-colors data-[highlighted]:bg-white/5 ${
+                                                i18n.language.startsWith(lang.code)
+                                                    ? 'bg-white text-black font-bold data-[highlighted]:bg-white'
+                                                    : 'text-neutral-400'
+                                            }`}
+                                        >
+                                            {lang.label}
+                                        </DropdownMenu.Item>
+                                    ))}
+                                </DropdownMenu.Content>
+                            </DropdownMenu.Portal>
+                        </DropdownMenu.Root>
 
                         <div className="w-[1px] h-5 bg-white/10" />
                         <button

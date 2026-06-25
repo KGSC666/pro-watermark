@@ -2,7 +2,6 @@ import React, { useState, useRef, useEffect } from 'react';
 import ReactDOM from 'react-dom/client';
 import { EditorLayout } from '../features/EditorLayout';
 import { CanvasEditor, type CanvasEditorRef } from '../features/CanvasEditor';
-import { Effect } from 'effect';
 import { processImagePipeline } from '../kernel/pipeline';
 import type { WatermarkConfig, Placement, Placements } from '../entities/watermark/types';
 import { useTranslation } from 'react-i18next';
@@ -13,6 +12,8 @@ import { SpeedInsights } from '@vercel/speed-insights/react';
 import { ErrorBoundary } from '../shared/ui/ErrorBoundary';
 import { Fader } from '../shared/ui/Fader';
 import { AnimatedNumber } from '../shared/ui/AnimatedNumber';
+import * as Toast from '@radix-ui/react-toast';
+import * as AlertDialog from '@radix-ui/react-alert-dialog';
 
 // A snappy spring used for the sliding selection pills (tabs, position grid).
 const PILL_SPRING = { type: 'spring', stiffness: 500, damping: 35 } as const;
@@ -32,7 +33,13 @@ const PANEL_ITEM = {
     },
 } as const;
 
-type Toast = { id: number; message: string; type: 'warn' | 'error' | 'info' };
+type ToastItem = {
+    id: number;
+    message: string;
+    type: 'warn' | 'error' | 'info';
+    title?: string;
+    open: boolean;
+};
 const TOAST_TTL_MS = 4200;
 
 // Export is near-instant, so a progress overlay tied to real work just flashes.
@@ -46,8 +53,6 @@ import ExifReader from 'exifreader';
 import { heicTo, isHeic as isHeicContent } from 'heic-to';
 import '../shared/lib/i18n'; // 初始化 i18n
 import './globals.css';
-
-console.log('App Version 1.0.1 - Initializing...');
 
 const COLOR_PRESETS = ['#FFFFFF', '#000000', '#FF3B30'];
 
@@ -113,18 +118,24 @@ const App = () => {
     const [exportReadout, setExportReadout] = useState<{ w: number; h: number; n: number } | null>(
         null,
     );
-    const [toasts, setToasts] = useState<Toast[]>([]);
+    const [toasts, setToasts] = useState<ToastItem[]>([]);
     // Index of the image awaiting delete confirmation (null = no dialog open).
     const [confirmDeleteIndex, setConfirmDeleteIndex] = useState<number | null>(null);
     // Whether the source-archive panel shows the full raw EXIF dump or just the
     // few key specs.
     const [showAllMeta, setShowAllMeta] = useState(false);
 
-    // Lightweight self-dismissing notifications, replacing the bare browser alert().
-    const showToast = (message: string, type: Toast['type'] = 'warn') => {
+    // Notifications via Radix Toast (accessible: aria-live, swipe-to-dismiss,
+    // pause-on-hover). Radix owns the auto-dismiss timer (per-toast `duration`);
+    // errors use Infinity so they stay until dismissed.
+    const showToast = (message: string, type: ToastItem['type'] = 'warn', title?: string) => {
         const id = Date.now() + Math.random();
-        setToasts((prev) => [...prev, { id, message, type }]);
-        setTimeout(() => setToasts((prev) => prev.filter((t) => t.id !== id)), TOAST_TTL_MS);
+        setToasts((prev) => [...prev, { id, message, type, title, open: true }]);
+    };
+    // Close (animate out) then remove from the list after the exit animation.
+    const dismissToast = (id: number) => {
+        setToasts((prev) => prev.map((x) => (x.id === id ? { ...x, open: false } : x)));
+        setTimeout(() => setToasts((prev) => prev.filter((x) => x.id !== id)), 220);
     };
     const editorRef = useRef<CanvasEditorRef>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
@@ -214,6 +225,7 @@ const App = () => {
         const currentSnapshot = await editorRef.current!.exportBlob().catch(() => null);
         let canvasDisturbed = false;
         const outFiles: File[] = [];
+        const failed: string[] = [];
 
         try {
             for (let i = 0; i < sourceFiles.length; i++) {
@@ -235,13 +247,19 @@ const App = () => {
                             st.placements[st.config.type],
                         );
                 }
-                const task = processImagePipeline(file, renderToBlob);
-                const finalFile = await Effect.runPromise(task);
                 const name = `pro_${file.name.replace(/\.(heic|heif)$/i, '.jpg')}`;
-                outFiles.push(new File([finalFile], name, { type: 'image/jpeg' }));
+                // Each image is isolated: a failure becomes a typed value, so one bad
+                // file no longer aborts the rest of the batch — we just note it.
+                const result = await processImagePipeline(file, renderToBlob);
+                result.match(
+                    (finalFile) =>
+                        outFiles.push(new File([finalFile], name, { type: 'image/jpeg' })),
+                    (e) => {
+                        console.error('Export failed:', e);
+                        failed.push(file.name);
+                    },
+                );
             }
-        } catch (err) {
-            console.error(err);
         } finally {
             // Only repaint if the loop actually overwrote the canvas with other
             // images; otherwise leave the user's dragged watermark untouched.
@@ -277,6 +295,16 @@ const App = () => {
         setExportComplete(true);
         await new Promise((r) => setTimeout(r, EXPORT_DONE_HOLD_MS));
         setIsExporting(false);
+
+        // Surface failures only after the overlay is gone, on the clean screen, so
+        // the (now sticky) message isn't hidden behind it or missed.
+        if (failed.length > 0) {
+            showToast(
+                t('export_partial', { names: failed.join(', ') }),
+                'error',
+                t('export_failed_title'),
+            );
+        }
     };
 
     const handleLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1017,114 +1045,120 @@ const App = () => {
                 )}
             </AnimatePresence>
 
-            {/* Delete confirmation dialog */}
-            <AnimatePresence>
-                {confirmDeleteIndex !== null && (
-                    <motion.div
-                        initial={{ opacity: 0 }}
-                        animate={{ opacity: 1 }}
-                        exit={{ opacity: 0 }}
-                        transition={{ duration: 0.18 }}
-                        onClick={() => setConfirmDeleteIndex(null)}
-                        // pointer-events-auto overrides the `pointer-events: none`
-                        // vaul's modal drawer puts on <body>; without it this dialog
-                        // (rendered outside the drawer) is visible but untappable on mobile.
-                        className="fixed inset-0 z-[105] bg-black/70 backdrop-blur-md flex items-center justify-center p-6 pointer-events-auto"
-                    >
-                        <motion.div
-                            initial={{ scale: 0.92, opacity: 0, y: 10 }}
-                            animate={{ scale: 1, opacity: 1, y: 0 }}
-                            exit={{ scale: 0.92, opacity: 0, y: 10 }}
-                            transition={PILL_SPRING}
-                            onClick={(e) => e.stopPropagation()}
-                            className="w-full max-w-xs bg-neutral-900 border border-white/10 rounded-3xl p-6 text-center shadow-2xl"
-                        >
+            {/* Delete confirmation — Radix AlertDialog (focus trap, Escape, a11y).
+                pointer-events-auto on overlay+content overrides the `pointer-events:
+                none` vaul's modal drawer puts on <body> (the × that opens this lives
+                inside the mobile drawer). */}
+            <AlertDialog.Root
+                open={confirmDeleteIndex !== null}
+                onOpenChange={(open) => {
+                    if (!open) setConfirmDeleteIndex(null);
+                }}
+            >
+                <AlertDialog.Portal>
+                    <AlertDialog.Overlay className="fixed inset-0 z-[105] bg-black/70 backdrop-blur-md pointer-events-auto data-[state=open]:animate-[fadeIn_0.18s_ease-out] data-[state=closed]:animate-[fadeOut_0.15s_ease-in]" />
+                    <AlertDialog.Content className="fixed inset-0 z-[106] flex items-center justify-center p-6 pointer-events-auto outline-none">
+                        <div className="w-full max-w-xs rounded-3xl border border-white/10 bg-neutral-900 p-6 text-center shadow-2xl animate-[dialogPop_0.2s_cubic-bezier(0.32,0.72,0,1)]">
                             <div className="w-12 h-12 mx-auto rounded-2xl bg-red-500/10 border border-red-500/20 flex items-center justify-center mb-4">
                                 <Trash2 size={22} className="text-red-400" />
                             </div>
-                            <p className="text-base font-bold tracking-tight">
+                            <AlertDialog.Title className="text-base font-bold tracking-tight">
                                 {t('confirm_delete_title')}
-                            </p>
-                            <p className="text-sm text-neutral-500 mt-2 leading-relaxed">
+                            </AlertDialog.Title>
+                            <AlertDialog.Description className="text-sm text-neutral-500 mt-2 leading-relaxed">
                                 {t('confirm_delete_desc')}
-                            </p>
+                            </AlertDialog.Description>
                             <div className="flex gap-2 mt-6">
-                                <button
-                                    onClick={() => setConfirmDeleteIndex(null)}
-                                    className="flex-1 py-2.5 rounded-xl bg-white/5 border border-white/10 text-sm font-semibold text-white/80 hover:bg-white/10 active:scale-95 transition-all"
-                                >
-                                    {t('cancel')}
-                                </button>
-                                <button
-                                    onClick={() => {
-                                        removeImage(confirmDeleteIndex);
-                                        setConfirmDeleteIndex(null);
-                                    }}
-                                    className="flex-1 py-2.5 rounded-xl bg-red-500 text-white text-sm font-semibold hover:bg-red-600 active:scale-95 transition-all"
-                                >
-                                    {t('remove')}
-                                </button>
+                                <AlertDialog.Cancel asChild>
+                                    <button className="flex-1 py-2.5 rounded-xl bg-white/5 border border-white/10 text-sm font-semibold text-white/80 hover:bg-white/10 active:scale-95 transition-all">
+                                        {t('cancel')}
+                                    </button>
+                                </AlertDialog.Cancel>
+                                <AlertDialog.Action asChild>
+                                    <button
+                                        onClick={() => {
+                                            if (confirmDeleteIndex !== null)
+                                                removeImage(confirmDeleteIndex);
+                                        }}
+                                        className="flex-1 py-2.5 rounded-xl bg-red-500 text-white text-sm font-semibold hover:bg-red-600 active:scale-95 transition-all"
+                                    >
+                                        {t('remove')}
+                                    </button>
+                                </AlertDialog.Action>
                             </div>
-                        </motion.div>
-                    </motion.div>
-                )}
-            </AnimatePresence>
+                        </div>
+                    </AlertDialog.Content>
+                </AlertDialog.Portal>
+            </AlertDialog.Root>
 
-            {/* Self-dismissing toasts (replaces native alert) */}
-            <div className="fixed bottom-8 left-1/2 -translate-x-1/2 z-[110] flex flex-col items-center gap-2 w-full max-w-md px-4 pointer-events-none">
-                <AnimatePresence>
-                    {toasts.map((toast) => (
-                        <motion.div
+            {/* Accessible toasts via Radix. Mobile: bottom-center (thumb reach).
+                Desktop: top-right of the canvas, tucked left of the 320px inspector
+                — more prominent for sticky errors. */}
+            <Toast.Provider swipeDirection="right" duration={TOAST_TTL_MS}>
+                {toasts.map((toast) => {
+                    const isError = toast.type === 'error';
+                    return (
+                        <Toast.Root
                             key={toast.id}
-                            layout
-                            initial={{ opacity: 0, y: 24, scale: 0.92 }}
-                            animate={{ opacity: 1, y: 0, scale: 1 }}
-                            exit={{ opacity: 0, y: 12, scale: 0.92 }}
-                            transition={PILL_SPRING}
-                            className="pointer-events-auto w-full flex items-start gap-3 px-4 py-3 rounded-2xl bg-neutral-900/80 backdrop-blur-xl border border-white/10 shadow-2xl"
+                            open={toast.open}
+                            duration={isError ? Number.POSITIVE_INFINITY : TOAST_TTL_MS}
+                            onOpenChange={(open) => {
+                                if (!open) dismissToast(toast.id);
+                            }}
+                            className={`pointer-events-auto flex w-full items-start gap-3 rounded-2xl px-4 py-3 backdrop-blur-xl shadow-2xl lg:w-[360px] data-[state=open]:animate-[toastIn_0.25s_cubic-bezier(0.32,0.72,0,1)] data-[state=closed]:animate-[toastOut_0.18s_ease-in] data-[swipe=move]:[transform:translateX(var(--radix-toast-swipe-move-x))] data-[swipe=cancel]:translate-x-0 data-[swipe=end]:animate-[toastSwipeOut_0.2s_ease-out] ${
+                                isError
+                                    ? 'border border-red-500/30 border-l-2 border-l-red-500 bg-red-950/50'
+                                    : 'border border-white/10 bg-neutral-900/80'
+                            }`}
                         >
-                            {toast.type === 'error' ? (
+                            {isError ? (
                                 <AlertTriangle size={18} className="text-red-400 shrink-0 mt-0.5" />
                             ) : toast.type === 'info' ? (
                                 <Trash2 size={18} className="text-white/50 shrink-0 mt-0.5" />
                             ) : (
                                 <Info size={18} className="text-amber-300 shrink-0 mt-0.5" />
                             )}
-                            <span className="text-sm text-white/90 leading-snug">
-                                {toast.message}
-                            </span>
-                            <button
-                                onClick={() =>
-                                    setToasts((prev) => prev.filter((x) => x.id !== toast.id))
-                                }
-                                className="ml-auto -mr-1 text-white/30 hover:text-white/80 transition-colors shrink-0"
+                            <div className="min-w-0 flex-1">
+                                {toast.title ? (
+                                    <>
+                                        <Toast.Title
+                                            className={`text-sm font-bold tracking-tight ${isError ? 'text-red-200' : 'text-white'}`}
+                                        >
+                                            {toast.title}
+                                        </Toast.Title>
+                                        <Toast.Description className="block text-sm text-white/90 leading-snug">
+                                            {toast.message}
+                                        </Toast.Description>
+                                    </>
+                                ) : (
+                                    <Toast.Title className="block text-sm text-white/90 leading-snug">
+                                        {toast.message}
+                                    </Toast.Title>
+                                )}
+                            </div>
+                            <Toast.Close
+                                aria-label="Close"
+                                className="-mr-1 text-white/30 hover:text-white/80 transition-colors shrink-0"
                             >
                                 <X size={15} />
-                            </button>
-                        </motion.div>
-                    ))}
-                </AnimatePresence>
-            </div>
+                            </Toast.Close>
+                        </Toast.Root>
+                    );
+                })}
+                <Toast.Viewport className="pointer-events-none fixed z-[110] flex flex-col gap-2 outline-none bottom-8 left-1/2 w-full max-w-md -translate-x-1/2 items-center px-4 lg:bottom-auto lg:left-auto lg:right-[336px] lg:top-6 lg:w-auto lg:max-w-sm lg:translate-x-0 lg:items-end lg:px-0" />
+            </Toast.Provider>
         </>
     );
 };
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
     <React.StrictMode>
-        <React.Suspense
-            fallback={
-                <div className="h-screen w-full bg-black flex items-center justify-center text-white">
-                    Loading...
-                </div>
-            }
-        >
-            <ErrorBoundary>
-                <MotionConfig reducedMotion="user">
-                    <App />
-                </MotionConfig>
-            </ErrorBoundary>
-            <Analytics />
-            <SpeedInsights />
-        </React.Suspense>
+        <ErrorBoundary>
+            <MotionConfig reducedMotion="user">
+                <App />
+            </MotionConfig>
+        </ErrorBoundary>
+        <Analytics />
+        <SpeedInsights />
     </React.StrictMode>,
 );

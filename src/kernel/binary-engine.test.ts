@@ -1,12 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { Effect } from "effect";
 import { BinarySurgery } from "./binary-engine";
 
 const bytes = (...b: number[]) => new Uint8Array(b);
 const arr = (u: Uint8Array) => Array.from(u);
 
-const extract = (buf: Uint8Array) => Effect.runSync(BinarySurgery.extractMetadataSegments(buf));
-const stitch = (pure: Uint8Array, segs: Uint8Array[]) => Effect.runSync(BinarySurgery.stitch(pure, segs));
+const extract = (buf: Uint8Array) => BinarySurgery.extractMetadataSegments(buf);
+const stitch = (pure: Uint8Array, segs: Uint8Array[]) => BinarySurgery.stitch(pure, segs);
 
 describe("extractMetadataSegments", () => {
   it("returns nothing for a non-JPEG buffer (tolerant, no throw)", () => {

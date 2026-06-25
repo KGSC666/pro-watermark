@@ -1,30 +1,46 @@
-import { Effect } from 'effect';
+import { ResultAsync } from 'neverthrow';
 import { BinarySurgery } from './binary-engine';
 
-export const processImagePipeline = (file: File, renderFn: () => Promise<Blob>) =>
-    Effect.gen(function* (_) {
-        // 1. 获取原图二进制
-        const arrayBuffer = yield* _(Effect.tryPromise(() => file.arrayBuffer()));
-        const originalBuffer = new Uint8Array(arrayBuffer);
+/** Typed failures for a single image's export, so the caller can report which
+ *  step failed for which file instead of catching an opaque `unknown`. */
+export type ExportError =
+    | { _tag: 'ReadError'; file: string; cause: unknown }
+    | { _tag: 'RenderError'; file: string; cause: unknown };
 
-        // 2. 提取元数据 (ICC/EXIF)，并把 EXIF 调整为适合导出衍生图的状态：
-        //    时间刷新为导出此刻（相册按最新排序）、方向复位为 1（像素已摆正，
-        //    避免相册二次旋转）。其余元数据保持无损。
-        const rawSegments = yield* _(BinarySurgery.extractMetadataSegments(originalBuffer));
-        const now = new Date();
-        const metadataSegments = rawSegments.map((seg) =>
-            BinarySurgery.sanitizeExifForExport(seg, now),
+/**
+ * Render one image and stitch the original metadata (EXIF/ICC) back onto the
+ * re-encoded JPEG, adjusting only capture time + orientation. Returns a
+ * `ResultAsync` so a single bad file surfaces as a typed error value rather than
+ * a thrown exception — the batch loop handles each result independently.
+ */
+export const processImagePipeline = (
+    file: File,
+    renderFn: () => Promise<Blob>,
+): ResultAsync<File, ExportError> => {
+    const now = new Date();
+
+    return ResultAsync.fromPromise(
+        file.arrayBuffer(),
+        (cause): ExportError => ({ _tag: 'ReadError', file: file.name, cause }),
+    )
+        .map((buf) => {
+            // Extract metadata, then refresh EXIF date + reset orientation for the
+            // exported derivative. All other metadata is preserved byte-for-byte.
+            const original = new Uint8Array(buf);
+            return BinarySurgery.extractMetadataSegments(original).map((seg) =>
+                BinarySurgery.sanitizeExifForExport(seg, now),
+            );
+        })
+        .andThen((segments) =>
+            ResultAsync.fromPromise(
+                renderFn().then((blob) => blob.arrayBuffer()),
+                (cause): ExportError => ({ _tag: 'RenderError', file: file.name, cause }),
+            ).map((renderedBuf) => {
+                const rendered = new Uint8Array(renderedBuf);
+                const finalBuffer = BinarySurgery.stitch(rendered, segments);
+                return new File([finalBuffer as unknown as BlobPart], file.name, {
+                    type: 'image/jpeg',
+                });
+            }),
         );
-
-        // 3. 执行 Canvas 渲染 (需在 UI 线程或 OffscreenCanvas)
-        const renderedBlob = yield* _(Effect.tryPromise(() => renderFn()));
-        const renderedBuffer = new Uint8Array(
-            yield* _(Effect.tryPromise(() => renderedBlob.arrayBuffer())),
-        );
-
-        // 4. 二进制缝合
-        const finalBuffer = yield* _(BinarySurgery.stitch(renderedBuffer, metadataSegments));
-
-        // 5. 返回带元数据的无损 File
-        return new File([finalBuffer as any], file.name, { type: 'image/jpeg' });
-    });
+};

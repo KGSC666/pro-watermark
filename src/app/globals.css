@@ -50,36 +50,64 @@ body {
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
 }
 
-/* 仪表推子：细轨 + 琥珀填充（由组件按数值注入 --fill）+ 精确滑块 */
-input[type='range'] {
-  @apply h-1.5 appearance-none rounded-full outline-none;
-  background: linear-gradient(
-    to right,
-    var(--accent) 0%,
-    var(--accent) var(--fill, 50%),
-    rgba(255, 255, 255, 0.12) var(--fill, 50%),
-    rgba(255, 255, 255, 0.12) 100%
-  );
+/* 滑块样式已迁移到 Radix Slider（见 shared/ui/Fader.tsx），此处不再需要原生
+   input[type=range] 的覆盖。*/
+
+/* Toast 动效：由 Radix Toast 的 data-state / data-swipe 驱动（见 main.tsx）。 */
+@keyframes toastIn {
+  from {
+    opacity: 0;
+    transform: translateY(14px) scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+@keyframes toastOut {
+  from {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(8px) scale(0.95);
+  }
+}
+@keyframes toastSwipeOut {
+  from {
+    transform: translateX(var(--radix-toast-swipe-end-x));
+  }
+  to {
+    transform: translateX(120%);
+    opacity: 0;
+  }
 }
 
-input[type='range']::-webkit-slider-thumb {
-  @apply h-4 w-4 cursor-pointer appearance-none rounded-full;
-  background: #fafafa;
-  box-shadow:
-    0 0 0 4px rgba(9, 9, 11, 0.9),
-    0 0 10px rgba(255, 176, 32, 0.55);
-  transition: box-shadow 0.15s ease;
+/* Radix AlertDialog（删除确认）入退场。 */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
 }
-
-input[type='range']:active::-webkit-slider-thumb {
-  box-shadow:
-    0 0 0 3px rgba(9, 9, 11, 0.9),
-    0 0 0 7px rgba(255, 176, 32, 0.25),
-    0 0 14px rgba(255, 176, 32, 0.7);
+@keyframes fadeOut {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
 }
-
-input[type='range']::-moz-range-thumb {
-  @apply h-4 w-4 cursor-pointer rounded-full border-0;
-  background: #fafafa;
-  box-shadow: 0 0 0 4px rgba(9, 9, 11, 0.9), 0 0 10px rgba(255, 176, 32, 0.55);
+@keyframes dialogPop {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
 }

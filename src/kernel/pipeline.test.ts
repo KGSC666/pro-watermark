@@ -1,5 +1,4 @@
 import { describe, it, expect } from 'vitest';
-import { Effect } from 'effect';
 import { processImagePipeline } from './pipeline';
 
 const bytes = (...b: number[]) => new Uint8Array(b);
@@ -11,7 +10,8 @@ const fileOf = (u: Uint8Array, name: string, type: string) => new File([part(u)]
 
 const run = async (file: File, rendered: Uint8Array) => {
     const renderFn = async () => new Blob([part(rendered)], { type: 'image/jpeg' });
-    const result = await Effect.runPromise(processImagePipeline(file, renderFn));
+    const res = await processImagePipeline(file, renderFn);
+    const result = res._unsafeUnwrap();
     return { result, body: new Uint8Array(await result.arrayBuffer()) };
 };
 
@@ -65,5 +65,20 @@ describe('processImagePipeline', () => {
         const original = fileOf(bytes(0xff, 0xd8, 0xff, 0xd9), 'IMG_0001.jpg', 'image/jpeg');
         const { result } = await run(original, bytes(0xff, 0xd8, 0xff, 0xd9));
         expect(result.name).toBe('IMG_0001.jpg');
+    });
+
+    it('returns a typed RenderError (not a throw) when rendering fails', async () => {
+        const original = fileOf(bytes(0xff, 0xd8, 0xff, 0xd9), 'bad.jpg', 'image/jpeg');
+        // e.g. an undecodable image: FabricImage.fromURL rejects inside renderFn.
+        const renderFn = async () => {
+            throw new Error('decode failed');
+        };
+
+        const res = await processImagePipeline(original, renderFn);
+
+        expect(res.isErr()).toBe(true);
+        const e = res._unsafeUnwrapErr();
+        expect(e._tag).toBe('RenderError');
+        expect(e.file).toBe('bad.jpg'); // names the offending file for the toast
     });
 });
